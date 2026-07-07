@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useEffect, useRef } from 'react'
 import type { Annotation, DocumentFull, TreeNode } from '../types'
 import { useStore } from '../store'
 import * as api from '../api'
@@ -12,8 +12,22 @@ const TABS: { key: Tab; label: string; icon: string }[] = [
   { key: 'note', label: 'Notes', icon: '📝' },
 ]
 
+const HIGHLIGHT_COLORS: { value: string; label: string; swatch: string }[] = [
+  { value: '',       label: 'All colors', swatch: 'linear-gradient(135deg,#ffd54f,#ff9800,#66bb6a,#42a5f5,#f48fb1)' },
+  { value: 'yellow', label: 'Yellow',     swatch: '#ffd54f' },
+  { value: 'orange', label: 'Orange',     swatch: '#ff9800' },
+  { value: 'green',  label: 'Green',      swatch: '#66bb6a' },
+  { value: 'blue',   label: 'Blue',       swatch: '#42a5f5' },
+  { value: 'pink',   label: 'Pink',       swatch: '#f48fb1' },
+]
+
 const TYPE_ICON: Record<string, string> = {
   highlight: '●', bookmark: '★', note: '📝',
+}
+
+const COLOR_STYLE: Record<string, string> = {
+  yellow: '#ffd54f', orange: '#ff9800', green: '#66bb6a',
+  blue: '#42a5f5', pink: '#f48fb1',
 }
 
 function annPreview(ann: Annotation): string {
@@ -74,20 +88,41 @@ interface Props {
 export function CollectionsDrawer({ doc, onClose, onJump }: Props) {
   const { state, dispatch } = useStore()
   const [activeTab, setActiveTab] = useState<Tab>('all')
+  const [colorFilter, setColorFilter] = useState<string>('')
+  const drawerRef = useRef<HTMLDivElement>(null)
+
+  // Reset color filter when switching tabs
+  const handleTabChange = (tab: Tab) => {
+    setActiveTab(tab)
+    if (tab !== 'highlight') setColorFilter('')
+  }
+
+  // Close when clicking outside the drawer
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (drawerRef.current && !drawerRef.current.contains(e.target as Node)) {
+        onClose()
+      }
+    }
+    const id = setTimeout(() => document.addEventListener('mousedown', handler), 50)
+    return () => { clearTimeout(id); document.removeEventListener('mousedown', handler) }
+  }, [onClose])
 
   const allAnns = useMemo(() => {
     const all: Annotation[] = []
     for (const anns of Object.values(state.annotationsByNode)) {
-      // exclude crossouts and shadow-context annotations from collections
       all.push(...anns.filter(a => a.type !== 'crossout' && !a.is_shadow))
     }
     return all.sort((a, b) => (a.created_at > b.created_at ? -1 : 1))
   }, [state.annotationsByNode])
 
-  const filtered = useMemo(
-    () => (activeTab === 'all' ? allAnns : allAnns.filter(a => a.type === activeTab)),
-    [allAnns, activeTab]
-  )
+  const filtered = useMemo(() => {
+    let result = activeTab === 'all' ? allAnns : allAnns.filter(a => a.type === activeTab)
+    if (activeTab === 'highlight' && colorFilter) {
+      result = result.filter(a => a.color === colorFilter)
+    }
+    return result
+  }, [allAnns, activeTab, colorFilter])
 
   const handleRemove = async (ann: Annotation) => {
     await api.deleteAnnotation(ann.id)
@@ -108,7 +143,7 @@ export function CollectionsDrawer({ doc, onClose, onJump }: Props) {
   }
 
   return (
-    <div className="collections-drawer">
+    <div className="collections-drawer" ref={drawerRef}>
       <div className="drawer-header">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h3>Collections</h3>
@@ -120,22 +155,39 @@ export function CollectionsDrawer({ doc, onClose, onJump }: Props) {
           <button
             key={t.key}
             className={`drawer-tab ${activeTab === t.key ? 'active' : ''}`}
-            onClick={() => setActiveTab(t.key)}
+            onClick={() => handleTabChange(t.key)}
           >
             {t.icon && <span style={{ marginRight: 3 }}>{t.icon}</span>}
             {t.label}
           </button>
         ))}
       </div>
+
+      {/* Color filter row — only visible on highlight tab */}
+      {activeTab === 'highlight' && (
+        <div className="drawer-color-filter">
+          {HIGHLIGHT_COLORS.map(c => (
+            <button
+              key={c.value}
+              className={`color-swatch-btn ${colorFilter === c.value ? 'active' : ''}`}
+              title={c.label}
+              onClick={() => setColorFilter(c.value)}
+              style={{ background: c.swatch }}
+            />
+          ))}
+        </div>
+      )}
+
       <div className="drawer-body">
         {filtered.length === 0 && (
           <div className="drawer-empty">Nothing here yet.</div>
         )}
         {filtered.map(ann => {
           const { kw, breadcrumb } = findNodeAndBreadcrumb(ann.node_id, doc)
+          const dotColor = ann.type === 'highlight' ? (COLOR_STYLE[ann.color ?? ''] ?? 'goldenrod') : undefined
           return (
             <div key={ann.id} className="collection-item" onClick={() => handleJump(ann)}>
-              <div className="ci-icon" style={ann.type === 'highlight' ? { color: 'goldenrod' } : {}}>
+              <div className="ci-icon" style={dotColor ? { color: dotColor } : {}}>
                 {TYPE_ICON[ann.type]}
               </div>
               <div className="ci-body">

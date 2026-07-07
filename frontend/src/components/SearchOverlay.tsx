@@ -5,7 +5,7 @@ import { useStore } from '../store'
 interface SearchResult {
   sectionTitle: string
   node: TreeNode
-  matchIn: 'kw' | 'say'
+  matchIn: 'kw' | 'say' | 'note'
   snippet: string
   ancestorIds: string[]
 }
@@ -50,6 +50,7 @@ interface Props {
 }
 
 export function SearchOverlay({ doc, onClose, onJump }: Props) {
+  const { state } = useStore()
   const [query, setQuery] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -73,6 +74,13 @@ export function SearchOverlay({ doc, onClose, onJump }: Props) {
     for (const { node, sectionTitle, ancestorIds } of allNodes) {
       const kwMatch = node.kw.toLowerCase().includes(q)
       const sayMatch = node.say.toLowerCase().includes(q)
+
+      // Check note content
+      const nodeNotes = state.annotationsByNode[node.id] ?? []
+      const noteMatch = nodeNotes.find(
+        a => a.type === 'note' && !a.is_shadow && a.note_body?.toLowerCase().includes(q)
+      )
+
       if (kwMatch) {
         found.push({ sectionTitle, node, matchIn: 'kw', snippet: node.kw, ancestorIds })
       } else if (sayMatch) {
@@ -81,10 +89,16 @@ export function SearchOverlay({ doc, onClose, onJump }: Props) {
           snippet: buildSnippet(node.say, q),
           ancestorIds,
         })
+      } else if (noteMatch) {
+        found.push({
+          sectionTitle, node, matchIn: 'note',
+          snippet: buildSnippet(noteMatch.note_body ?? '', q),
+          ancestorIds,
+        })
       }
     }
     return found.slice(0, 40)
-  }, [query, allNodes])
+  }, [query, allNodes, state.annotationsByNode])
 
   const handleJump = (r: SearchResult) => {
     onJump(r.node.id, [...r.ancestorIds, r.node.id])
@@ -98,7 +112,7 @@ export function SearchOverlay({ doc, onClose, onJump }: Props) {
           <span style={{ color: 'var(--text-3)', fontSize: 16 }}>🔍</span>
           <input
             ref={inputRef}
-            placeholder="Search keywords and content…"
+            placeholder="Search keywords, content and notes…"
             value={query}
             onChange={e => setQuery(e.target.value)}
           />
@@ -106,7 +120,7 @@ export function SearchOverlay({ doc, onClose, onJump }: Props) {
         </div>
         <div className="search-results">
           {query.trim() === '' && (
-            <div className="search-empty">Type to search across all nodes, including collapsed ones.</div>
+            <div className="search-empty">Type to search across all nodes and notes, including collapsed ones.</div>
           )}
           {query.trim() !== '' && results.length === 0 && (
             <div className="search-empty">No results for "{query}"</div>
@@ -114,10 +128,12 @@ export function SearchOverlay({ doc, onClose, onJump }: Props) {
           {results.map((r, i) => (
             <div key={i} className="search-result-item" onClick={() => handleJump(r)}>
               <div className="result-breadcrumb">
-                {r.sectionTitle} › <span style={{ color: 'var(--text-2)' }}>{r.matchIn === 'say' ? 'content' : 'keyword'}</span>
+                {r.sectionTitle} › <span style={{ color: 'var(--text-2)' }}>
+                  {r.matchIn === 'say' ? 'content' : r.matchIn === 'note' ? 'note' : 'keyword'}
+                </span>
               </div>
               <div className="result-kw">{r.node.kw}</div>
-              {r.matchIn === 'say' && (
+              {(r.matchIn === 'say' || r.matchIn === 'note') && (
                 <div className="result-snippet">
                   {highlightSnippet(r.snippet, query.trim())}
                 </div>

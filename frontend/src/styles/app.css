@@ -79,6 +79,34 @@ body {
 .doc-card p { font-size: 13px; color: var(--text-2); margin-top: 2px; }
 .doc-card .card-actions { display: flex; gap: 8px; flex-shrink: 0; }
 
+/* Inline rename */
+.doc-title-row { display: flex; align-items: center; gap: 6px; }
+.doc-title-text { font-size: 15px; font-weight: 600; }
+.doc-rename-btn {
+  opacity: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--text-3);
+  padding: 2px 4px;
+  transition: opacity 0.1s;
+}
+.doc-card:hover .doc-rename-btn { opacity: 1; }
+.doc-rename-btn:hover { color: var(--accent); }
+.doc-rename-input {
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  border: none;
+  border-bottom: 2px solid var(--accent);
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  width: 100%;
+  padding: 2px 0;
+}
+
 .btn {
   font: inherit;
   font-size: 13px;
@@ -386,6 +414,20 @@ del.xout {
 }
 .notepad-resize-handle:hover { opacity: 0.8; }
 
+/* Multi-edge resize handles */
+.notepad-edge { position: absolute; z-index: 10; }
+.notepad-edge-left   { left: 0; top: 8px; bottom: 8px; width: 5px; cursor: w-resize; }
+.notepad-edge-right  { right: 0; top: 8px; bottom: 8px; width: 5px; cursor: e-resize; }
+.notepad-edge-bottom { left: 8px; right: 8px; bottom: 0; height: 5px; cursor: s-resize; }
+.notepad-edge-bl     { left: 0; bottom: 0; width: 12px; height: 12px; cursor: sw-resize; }
+.notepad-edge-br     { right: 0; bottom: 0; width: 12px; height: 12px; cursor: se-resize; }
+
+/* Pinned note card */
+.note-card-pinned {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 5%, var(--sub-bg));
+}
+
 .notepad-add-btn {
   width: 100%;
   font: inherit;
@@ -536,6 +578,28 @@ del.xout {
   cursor: pointer;
 }
 .drawer-tab.active { background: var(--accent-bg); color: var(--accent); border-color: var(--accent-border); }
+
+/* Color filter row in highlights tab */
+.drawer-color-filter {
+  display: flex;
+  gap: 6px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--line);
+  align-items: center;
+}
+.color-swatch-btn {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: transform 0.12s, border-color 0.12s;
+  flex-shrink: 0;
+}
+.color-swatch-btn:hover { transform: scale(1.2); }
+.color-swatch-btn.active { border-color: var(--text); transform: scale(1.15); }
+/* First swatch (all colors) is a mini gradient disc */
+.color-swatch-btn:first-child { width: 22px; height: 22px; }
 
 .drawer-body { flex: 1; overflow-y: auto; padding: 12px 0; }
 
@@ -745,8 +809,7 @@ del.xout {
 .undo-toast {
   position: fixed;
   bottom: 24px;
-  left: 50%;
-  transform: translateX(-50%);
+  left: 24px;
   background: var(--surface);
   border: 1px solid var(--line-strong);
   border-radius: 10px;

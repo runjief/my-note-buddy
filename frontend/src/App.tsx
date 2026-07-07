@@ -69,9 +69,16 @@ function DocumentList({ onOpen }: { onOpen: (id: string) => void }) {
   const [docs, setDocs] = useState<DocumentSummary[]>([])
   const [pasteOpen, setPasteOpen] = useState(false)
   const [pasteText, setPasteText] = useState('')
+  const [renamingId, setRenamingId] = useState<string | null>(null)
+  const [renameTitle, setRenameTitle] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
+  const renameInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => { api.listDocuments().then(setDocs).catch(console.error) }, [])
+
+  useEffect(() => {
+    if (renamingId) { setTimeout(() => renameInputRef.current?.focus(), 30) }
+  }, [renamingId])
 
   const parseAndImport = async (text: string) => {
     let payload: object
@@ -113,6 +120,50 @@ function DocumentList({ onOpen }: { onOpen: (id: string) => void }) {
     setDocs(d => d.filter(x => x.id !== id))
   }
 
+  const startRename = (e: React.MouseEvent, id: string, currentTitle: string) => {
+    e.stopPropagation()
+    setRenamingId(id)
+    setRenameTitle(currentTitle)
+  }
+
+  const commitRename = async () => {
+    if (!renamingId || !renameTitle.trim()) { setRenamingId(null); return }
+    try {
+      const { title } = await api.renameDocument(renamingId, renameTitle.trim())
+      setDocs(d => d.map(x => x.id === renamingId ? { ...x, title } : x))
+    } catch {}
+    setRenamingId(null)
+  }
+
+  const handleRenameKey = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') commitRename()
+    if (e.key === 'Escape') setRenamingId(null)
+  }
+
+  const renderDocTitle = (id: string, title: string, isShadow: boolean) => {
+    if (renamingId === id) {
+      return (
+        <input
+          ref={renameInputRef}
+          className="doc-rename-input"
+          value={renameTitle}
+          onChange={e => setRenameTitle(e.target.value)}
+          onBlur={commitRename}
+          onKeyDown={handleRenameKey}
+          onClick={e => e.stopPropagation()}
+        />
+      )
+    }
+    return (
+      <span className="doc-title-row">
+        {isShadow && <span className="shadow-doc-tag">Shadow</span>}
+        <span className="doc-title-text">{title}</span>
+        <button className="doc-rename-btn" title="Rename"
+          onClick={e => startRename(e, id, title)}>✎</button>
+      </span>
+    )
+  }
+
   // Group: originals with their shadows nested
   const originals = docs.filter(d => !d.origin_document_id)
   const shadows   = docs.filter(d => !!d.origin_document_id)
@@ -125,9 +176,9 @@ function DocumentList({ onOpen }: { onOpen: (id: string) => void }) {
         const docShadows = shadows.filter(s => s.origin_document_id === d.id)
         return (
           <React.Fragment key={d.id}>
-            <div className="doc-card" onClick={() => onOpen(d.id)}>
-              <div>
-                <h2>{d.title}</h2>
+            <div className="doc-card" onClick={() => renamingId !== d.id && onOpen(d.id)}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                {renderDocTitle(d.id, d.title, false)}
                 {d.subtitle && <p>{d.subtitle}</p>}
               </div>
               <div className="card-actions">
@@ -135,10 +186,9 @@ function DocumentList({ onOpen }: { onOpen: (id: string) => void }) {
               </div>
             </div>
             {docShadows.map(sd => (
-              <div key={sd.id} className="doc-card doc-card-shadow" onClick={() => onOpen(sd.id)}>
-                <div className="shadow-doc-indicator">
-                  <span className="shadow-doc-tag">Shadow</span>
-                  {sd.title.replace(/^\[Shadow\]\s*/, '').split('—')[0].trim()}
+              <div key={sd.id} className="doc-card doc-card-shadow" onClick={() => renamingId !== sd.id && onOpen(sd.id)}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  {renderDocTitle(sd.id, sd.title, true)}
                 </div>
                 <div className="card-actions">
                   <button className="btn btn-sm btn-danger" onClick={e => handleDelete(e, sd.id)}>Delete</button>
@@ -151,10 +201,9 @@ function DocumentList({ onOpen }: { onOpen: (id: string) => void }) {
 
       {/* Orphaned shadow docs (whose parent was deleted) */}
       {shadows.filter(s => !originals.some(o => o.id === s.origin_document_id)).map(sd => (
-        <div key={sd.id} className="doc-card doc-card-shadow" onClick={() => onOpen(sd.id)}>
-          <div>
-            <span className="shadow-doc-tag">Shadow</span>
-            <span style={{ color: 'var(--text-2)', fontSize: 13 }}>{sd.title}</span>
+        <div key={sd.id} className="doc-card doc-card-shadow" onClick={() => renamingId !== sd.id && onOpen(sd.id)}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            {renderDocTitle(sd.id, sd.title, true)}
           </div>
           <div className="card-actions">
             <button className="btn btn-sm btn-danger" onClick={e => handleDelete(e, sd.id)}>Delete</button>
@@ -220,12 +269,22 @@ function DocView({ docId, onBack }: { docId: string; onBack: () => void; onNavig
 
   // Toasts
   const [toast, setToast] = useState<string | null>(null)
-  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const showToast = (msg: string, ms = 4000) => {
+  const toastTimer  = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const undoTimer   = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const showToast = (msg: string, ms = 5000) => {
     setToast(msg)
     if (toastTimer.current) clearTimeout(toastTimer.current)
     toastTimer.current = setTimeout(() => setToast(null), ms)
   }
+
+  // Auto-dismiss undo toast after 30s
+  useEffect(() => {
+    if (state.lastUndo) {
+      if (undoTimer.current) clearTimeout(undoTimer.current)
+      undoTimer.current = setTimeout(() => dispatch({ type: 'CLEAR_UNDO_TOAST' }), 30000)
+    }
+    return () => { if (undoTimer.current) clearTimeout(undoTimer.current) }
+  }, [state.lastUndo, dispatch])
 
   // ── Load current doc ──────────────────────────────────────────
   useEffect(() => {

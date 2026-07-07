@@ -4,40 +4,36 @@ import type { Annotation } from '../types'
 import * as api from '../api'
 
 const LS_SIZE_KEY = 'notepad-size'
+const LS_PIN_KEY  = 'notepad-pins'
 const DEFAULT_W   = 300
 const DEFAULT_H   = 380
-const MIN_W       = 220
-const MIN_H       = 180
+const MIN_W = 200
+const MIN_H = 160
 
-function loadSize(): { w: number; h: number } {
-  try {
-    const raw = localStorage.getItem(LS_SIZE_KEY)
-    if (raw) return JSON.parse(raw)
-  } catch {}
+function loadSize() {
+  try { const r = localStorage.getItem(LS_SIZE_KEY); if (r) return JSON.parse(r) } catch {}
   return { w: DEFAULT_W, h: DEFAULT_H }
 }
 function saveSize(w: number, h: number) {
   try { localStorage.setItem(LS_SIZE_KEY, JSON.stringify({ w, h })) } catch {}
 }
+function loadPins(): Set<string> {
+  try { const r = localStorage.getItem(LS_PIN_KEY); if (r) return new Set(JSON.parse(r)) } catch {}
+  return new Set()
+}
+function savePins(pins: Set<string>) {
+  try { localStorage.setItem(LS_PIN_KEY, JSON.stringify([...pins])) } catch {}
+}
 
-// ── Image parsing ──────────────────────────────────────────────────────────────
+// ── Image rendering ────────────────────────────────────────────────────────────
 
 function renderBodyWithImages(body: string, onZoom: (url: string) => void) {
-  const parts = body.split(/(!\[\]\([^)]+\))/g)
-  return parts.map((part, i) => {
+  return body.split(/(!\[\]\([^)]+\))/g).map((part, i) => {
     const m = part.match(/^!\[\]\(([^)]+)\)$/)
-    if (m) {
-      return (
-        <img
-          key={i}
-          src={m[1]}
-          className="note-image"
-          onClick={() => onZoom(m[1])}
-          alt=""
-          title="Click to enlarge"
-        />
-      )
-    }
+    if (m) return (
+      <img key={i} src={m[1]} className="note-image"
+        onClick={() => onZoom(m[1])} alt="" title="Click to enlarge" />
+    )
     return part ? <span key={i} style={{ whiteSpace: 'pre-wrap' }}>{part}</span> : null
   })
 }
@@ -46,19 +42,20 @@ function renderBodyWithImages(body: string, onZoom: (url: string) => void) {
 
 interface NoteCardProps {
   ann: Annotation
+  pinned: boolean
+  onPin: () => void
   onUpdate: (ann: Annotation) => void
   onDelete: () => void
   onZoomImage: (url: string) => void
 }
 
-function NoteCard({ ann, onUpdate, onDelete, onZoomImage }: NoteCardProps) {
-  const [body, setBody] = useState(ann.note_body ?? '')
-  // Default to preview if there is content
+function NoteCard({ ann, pinned, onPin, onUpdate, onDelete, onZoomImage }: NoteCardProps) {
+  const [body, setBody]       = useState(ann.note_body ?? '')
   const [preview, setPreview] = useState(() => !!(ann.note_body?.trim()))
   const [uploading, setUploading] = useState(false)
   const [r2Available, setR2Available] = useState<boolean | null>(null)
-  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const fileRef   = useRef<HTMLInputElement>(null)
+  const saveTimer   = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const fileRef     = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
@@ -73,89 +70,84 @@ function NoteCard({ ann, onUpdate, onDelete, onZoomImage }: NoteCardProps) {
       onUpdate(updated)
     }, 800)
   }
-
   useEffect(() => () => { if (saveTimer.current) clearTimeout(saveTimer.current) }, [])
 
   const insertAtCursor = (insertion: string) => {
     const ta = textareaRef.current
     if (!ta) { handleChange(body + insertion); return }
-    const start = ta.selectionStart
-    const end   = ta.selectionEnd
-    const next  = body.slice(0, start) + insertion + body.slice(end)
+    const s = ta.selectionStart, e = ta.selectionEnd
+    const next = body.slice(0, s) + insertion + body.slice(e)
     handleChange(next)
-    requestAnimationFrame(() => {
-      ta.selectionStart = ta.selectionEnd = start + insertion.length
-      ta.focus()
-    })
+    requestAnimationFrame(() => { ta.selectionStart = ta.selectionEnd = s + insertion.length; ta.focus() })
+  }
+
+  const uploadFile = async (file: File) => {
+    setUploading(true)
+    try { const { url } = await api.uploadImage(file); insertAtCursor(`![](${url})`) }
+    catch (err: any) { alert(`Upload failed: ${err.message}`) }
+    finally { setUploading(false) }
   }
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
+    const file = e.target.files?.[0]; if (!file) return
     e.target.value = ''
-    setUploading(true)
-    try {
-      const { url } = await api.uploadImage(file)
-      insertAtCursor(`![](${url})`)
-    } catch (err: any) {
-      alert(`Upload failed: ${err.message}`)
-    } finally {
-      setUploading(false)
+    await uploadFile(file)
+  }
+
+  const handlePaste = async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = e.clipboardData?.items
+    if (!items) return
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.startsWith('image/')) {
+        const file = items[i].getAsFile()
+        if (file && r2Available) {
+          e.preventDefault()
+          await uploadFile(file)
+          return
+        }
+      }
     }
   }
 
   const hasImages = /!\[\]\([^)]+\)/.test(body)
 
   return (
-    <div className="note-card">
+    <div className={`note-card ${pinned ? 'note-card-pinned' : ''}`}>
       <div className="note-card-toolbar">
         <button
-          className={`btn btn-sm ${!preview ? 'active' : ''}`}
-          onMouseDown={e => { e.preventDefault(); setPreview(false) }}
-          title="Edit mode"
-        >Edit</button>
-        <button
-          className={`btn btn-sm ${preview ? 'active' : ''}`}
-          onMouseDown={e => { e.preventDefault(); setPreview(true) }}
-          title="Preview"
-        >Preview</button>
+          className={`btn btn-sm ${pinned ? 'active' : ''}`}
+          title={pinned ? 'Unpin' : 'Pin to top'}
+          onMouseDown={e => { e.preventDefault(); onPin() }}
+        >📌</button>
+        <button className={`btn btn-sm ${!preview ? 'active' : ''}`}
+          onMouseDown={e => { e.preventDefault(); setPreview(false) }}>Edit</button>
+        <button className={`btn btn-sm ${preview ? 'active' : ''}`}
+          onMouseDown={e => { e.preventDefault(); setPreview(true) }}>Preview</button>
         {r2Available && (
-          <button
-            className="btn btn-sm"
+          <button className="btn btn-sm" disabled={uploading}
             onMouseDown={e => { e.preventDefault(); fileRef.current?.click() }}
-            disabled={uploading}
-            title="Upload image to Cloudflare R2"
-          >
-            {uploading ? '…' : '🖼'}
-          </button>
+            title="Upload image (or paste from clipboard)">{uploading ? '…' : '🖼'}</button>
         )}
         {!r2Available && r2Available !== null && (
-          <span title="R2 not configured — see setup guide" style={{ fontSize: 11, color: 'var(--text-3)', cursor: 'help' }}>🖼?</span>
+          <span title="R2 not configured" style={{ fontSize: 11, color: 'var(--text-3)', cursor: 'help' }}>🖼?</span>
         )}
         <input ref={fileRef} type="file" accept="image/*" hidden onChange={handleFileChange} />
       </div>
 
       {preview ? (
-        <div
-          className="note-preview"
-          onClick={() => setPreview(false)}
-          title="Click to edit"
-        >
+        <div className="note-preview" onClick={() => setPreview(false)} title="Click to edit">
           {body.trim()
             ? renderBodyWithImages(body, onZoomImage)
-            : <span style={{ color: 'var(--text-3)', fontStyle: 'italic' }}>Empty — click to edit</span>
-          }
+            : <span style={{ color: 'var(--text-3)', fontStyle: 'italic' }}>Empty — click to edit</span>}
           {hasImages && <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 4 }}>Click image to enlarge</div>}
         </div>
       ) : (
-        <textarea
-          ref={textareaRef}
-          value={body}
+        <textarea ref={textareaRef} value={body}
           onChange={e => handleChange(e.target.value)}
-          placeholder="Write a note… upload images with 🖼"
+          onPaste={handlePaste}
+          placeholder="Write a note… upload images with 🖼 or paste from clipboard"
           style={{ minHeight: 72 }}
-          onBlur={() => { if (body.trim()) setPreview(true) }}
-        />
+          onBlur={() => { if (body.trim()) setPreview(true) }} />
       )}
 
       <div className="note-card-actions">
@@ -178,146 +170,146 @@ interface Props {
   onDeleteNote: (annId: string) => void
 }
 
+type ResizeEdge = 'left' | 'right' | 'bottom' | 'bottom-left' | 'bottom-right'
+
 export function NotepadPanel({ nodeId, nodeKw, top, notes, onClose, onAddNote, onUpdateNote, onDeleteNote }: Props) {
-  const panelRef  = useRef<HTMLDivElement>(null)
+  const panelRef   = useRef<HTMLDivElement>(null)
   const isDragging = useRef(false)
   const isResizing = useRef(false)
-  const dragOrigin = useRef({ mouseX: 0, mouseY: 0, panelX: 0, panelY: 0 })
-  const resizeOrigin = useRef({ mouseX: 0, mouseY: 0, w: 0, h: 0 })
 
-  const [pos, setPos] = useState(() => ({
-    x: Math.min(window.innerWidth - loadSize().w - 20, window.innerWidth - 320),
-    y: Math.max(8, Math.min(top, window.innerHeight - 120)),
-  }))
+  const [pos,  setPos]  = useState(() => {
+    const sz = loadSize()
+    return { x: Math.max(8, window.innerWidth - sz.w - 24), y: Math.max(8, Math.min(top, window.innerHeight - 120)) }
+  })
   const [size, setSize] = useState(loadSize)
   const [zoomedImg, setZoomedImg] = useState<string | null>(null)
+  const [pins, setPins] = useState<Set<string>>(loadPins)
 
-  // ── Dragging (header) ────────────────────────────────────────
+  // Snapshots at drag/resize start
+  const startSnap = useRef({ x: 0, y: 0, w: 0, h: 0, mx: 0, my: 0 })
+
+  const togglePin = (annId: string) => {
+    setPins(prev => {
+      const next = new Set(prev)
+      if (next.has(annId)) next.delete(annId)
+      else next.add(annId)
+      savePins(next)
+      return next
+    })
+  }
+
+  // Sort notes: pinned first, then by created_at desc
+  const sortedNotes = [...notes].sort((a, b) => {
+    const ap = pins.has(a.id) ? 0 : 1
+    const bp = pins.has(b.id) ? 0 : 1
+    if (ap !== bp) return ap - bp
+    return a.created_at < b.created_at ? 1 : -1
+  })
+
+  // ── Header drag ────────────────────────────────────────────────
   const handleHeaderMouseDown = useCallback((e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest('button')) return
     e.preventDefault()
     isDragging.current = true
-    dragOrigin.current = { mouseX: e.clientX, mouseY: e.clientY, panelX: pos.x, panelY: pos.y }
+    startSnap.current = { x: pos.x, y: pos.y, w: size.w, h: size.h, mx: e.clientX, my: e.clientY }
 
     const onMove = (ev: MouseEvent) => {
       if (!isDragging.current) return
+      const dx = ev.clientX - startSnap.current.mx
+      const dy = ev.clientY - startSnap.current.my
       setPos({
-        x: Math.max(0, Math.min(window.innerWidth - size.w, dragOrigin.current.panelX + ev.clientX - dragOrigin.current.mouseX)),
-        y: Math.max(0, Math.min(window.innerHeight - 60,    dragOrigin.current.panelY + ev.clientY - dragOrigin.current.mouseY)),
+        x: Math.max(0, Math.min(window.innerWidth - startSnap.current.w, startSnap.current.x + dx)),
+        y: Math.max(0, Math.min(window.innerHeight - 40, startSnap.current.y + dy)),
       })
     }
-    const onUp = () => {
-      isDragging.current = false
-      document.removeEventListener('mousemove', onMove)
-      document.removeEventListener('mouseup', onUp)
-    }
+    const onUp = () => { isDragging.current = false; document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp) }
     document.addEventListener('mousemove', onMove)
     document.addEventListener('mouseup', onUp)
   }, [pos, size.w])
 
-  // ── Resizing (bottom-right handle) ──────────────────────────
-  const handleResizeMouseDown = useCallback((e: React.MouseEvent) => {
+  // ── Edge resize ────────────────────────────────────────────────
+  const handleEdgeMouseDown = useCallback((e: React.MouseEvent, edge: ResizeEdge) => {
     e.preventDefault()
     e.stopPropagation()
     isResizing.current = true
-    resizeOrigin.current = { mouseX: e.clientX, mouseY: e.clientY, w: size.w, h: size.h }
+    startSnap.current = { x: pos.x, y: pos.y, w: size.w, h: size.h, mx: e.clientX, my: e.clientY }
 
     const onMove = (ev: MouseEvent) => {
       if (!isResizing.current) return
-      const newW = Math.max(MIN_W, resizeOrigin.current.w + ev.clientX - resizeOrigin.current.mouseX)
-      const newH = Math.max(MIN_H, resizeOrigin.current.h + ev.clientY - resizeOrigin.current.mouseY)
-      setSize({ w: newW, h: newH })
+      const dx = ev.clientX - startSnap.current.mx
+      const dy = ev.clientY - startSnap.current.my
+      setPos(p => {
+        let nx = p.x, ny = p.y
+        setSize((s: { w: number; h: number }) => {
+          let nw = s.w, nh = s.h
+          if (edge === 'right' || edge === 'bottom-right')  nw = Math.max(MIN_W, startSnap.current.w + dx)
+          if (edge === 'left'  || edge === 'bottom-left') {
+            nw = Math.max(MIN_W, startSnap.current.w - dx)
+            nx = startSnap.current.x + startSnap.current.w - nw
+          }
+          if (edge === 'bottom' || edge === 'bottom-left' || edge === 'bottom-right')
+            nh = Math.max(MIN_H, startSnap.current.h + dy)
+          return { w: nw, h: nh }
+        })
+        return { x: nx, y: ny }
+      })
     }
     const onUp = () => {
       isResizing.current = false
-      setSize(s => { saveSize(s.w, s.h); return s })
+      setSize((s: { w: number; h: number }) => { saveSize(s.w, s.h); return s })
       document.removeEventListener('mousemove', onMove)
       document.removeEventListener('mouseup', onUp)
     }
     document.addEventListener('mousemove', onMove)
     document.addEventListener('mouseup', onUp)
-  }, [size])
+  }, [pos, size])
 
-  // ── Add note ─────────────────────────────────────────────────
   const handleAdd = useCallback(async () => {
     const ann = await api.createAnnotation(nodeId, { type: 'note', note_body: '' })
     onAddNote(ann)
   }, [nodeId, onAddNote])
-
-  // ── Click-outside to close ───────────────────────────────────
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (isDragging.current || isResizing.current) return
-      if (zoomedImg) return   // image overlay is open
-      if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
-        onClose()
-      }
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [onClose, zoomedImg])
 
   return (
     <>
       <div
         ref={panelRef}
         className="notepad-panel"
-        style={{ left: pos.x, top: pos.y, right: 'auto', width: size.w, maxHeight: size.h }}
+        style={{ left: pos.x, top: pos.y, right: 'auto', width: size.w, height: size.h }}
       >
-        {/* Header — drag handle */}
-        <div
-          className="notepad-header"
-          onMouseDown={handleHeaderMouseDown}
-          style={{ cursor: isDragging.current ? 'grabbing' : 'grab' }}
-        >
+        {/* Edge resize handles */}
+        <div className="notepad-edge notepad-edge-left"   onMouseDown={e => handleEdgeMouseDown(e, 'left')} />
+        <div className="notepad-edge notepad-edge-right"  onMouseDown={e => handleEdgeMouseDown(e, 'right')} />
+        <div className="notepad-edge notepad-edge-bottom" onMouseDown={e => handleEdgeMouseDown(e, 'bottom')} />
+        <div className="notepad-edge notepad-edge-bl"     onMouseDown={e => handleEdgeMouseDown(e, 'bottom-left')} />
+        <div className="notepad-edge notepad-edge-br"     onMouseDown={e => handleEdgeMouseDown(e, 'bottom-right')} />
+
+        {/* Header */}
+        <div className="notepad-header" onMouseDown={handleHeaderMouseDown} style={{ cursor: 'grab' }}>
           <span>Notepad</span>
-          <span style={{ color: 'var(--text-2)', fontWeight: 400, fontSize: 12, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginLeft: 8 }}>
-            {nodeKw}
-          </span>
-          <button
-            className="btn btn-sm"
-            style={{ border: 'none', padding: '2px 6px', flexShrink: 0 }}
-            onClick={onClose}
-            aria-label="Close notepad"
-          >✕</button>
+          <span className="notepad-kw">{nodeKw}</span>
+          <button className="btn btn-sm" style={{ border: 'none', padding: '2px 6px', flexShrink: 0 }}
+            onClick={onClose} aria-label="Close">✕</button>
         </div>
 
-        {/* Notes */}
+        {/* Body */}
         <div className="notepad-body">
-          {notes.map(ann => (
-            <NoteCard
-              key={ann.id}
-              ann={ann}
+          {sortedNotes.map(ann => (
+            <NoteCard key={ann.id} ann={ann}
+              pinned={pins.has(ann.id)}
+              onPin={() => togglePin(ann.id)}
               onUpdate={onUpdateNote}
               onDelete={() => onDeleteNote(ann.id)}
-              onZoomImage={setZoomedImg}
-            />
+              onZoomImage={setZoomedImg} />
           ))}
-          <button className="notepad-add-btn" onClick={handleAdd}>
-            + Add note
-          </button>
+          <button className="notepad-add-btn" onClick={handleAdd}>+ Add note</button>
         </div>
-
-        {/* Resize handle */}
-        <div
-          className="notepad-resize-handle"
-          onMouseDown={handleResizeMouseDown}
-          title="Drag to resize"
-        />
       </div>
 
-      {/* Image zoom overlay — rendered outside panel so it's not clipped */}
+      {/* Image zoom overlay */}
       {zoomedImg && createPortal(
-        <div
-          className="note-image-overlay"
-          onClick={() => setZoomedImg(null)}
-        >
-          <img
-            src={zoomedImg}
-            style={{ maxWidth: '90vw', maxHeight: '90vh', borderRadius: 8, objectFit: 'contain' }}
-            alt=""
-          />
-          <div style={{ position: 'absolute', top: 16, right: 20, color: '#fff', fontSize: 24, cursor: 'pointer', lineHeight: 1 }}>✕</div>
+        <div className="note-image-overlay" onClick={() => setZoomedImg(null)}>
+          <img src={zoomedImg} style={{ maxWidth: '90vw', maxHeight: '90vh', objectFit: 'contain' }} alt="" />
+          <div style={{ position: 'absolute', top: 16, right: 20, color: '#fff', fontSize: 24, cursor: 'pointer' }}>✕</div>
         </div>,
         document.body
       )}

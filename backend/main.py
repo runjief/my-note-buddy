@@ -142,6 +142,9 @@ class ShadowNotePut(BaseModel):
     body: str
     status: str = "partial"
 
+class DocumentPatch(BaseModel):
+    title: str
+
 # ── Seed logic ───────────────────────────────────────────────────────────────
 
 def _create_nodes(session: Session, section_id: str, parent_id: Optional[str], nodes_data: list):
@@ -229,7 +232,11 @@ def _get_all_node_ids(s: Session, doc_id: str) -> list:
     return ids
 
 def _copy_nodes_recursive(s: Session, orig_section_id: str, shadow_section_id: str,
-                           orig_parent_id: Optional[str], shadow_parent_id: Optional[str]):
+                           orig_parent_id: Optional[str], shadow_parent_id: Optional[str],
+                           id_map: Optional[dict] = None) -> dict:
+    """Returns {orig_node_id: shadow_node_id} mapping for the entire subtree."""
+    if id_map is None:
+        id_map = {}
     orig_nodes = s.exec(
         select(Node)
         .where(Node.section_id == orig_section_id)
@@ -249,7 +256,9 @@ def _copy_nodes_recursive(s: Session, orig_section_id: str, shadow_section_id: s
         )
         s.add(shadow_node)
         s.flush()
-        _copy_nodes_recursive(s, orig_section_id, shadow_section_id, orig_node.id, shadow_node.id)
+        id_map[orig_node.id] = shadow_node.id
+        _copy_nodes_recursive(s, orig_section_id, shadow_section_id, orig_node.id, shadow_node.id, id_map)
+    return id_map
 
 # ── Routes: Documents ─────────────────────────────────────────────────────────
 
@@ -407,6 +416,17 @@ def delete_document(doc_id: str, s: Session = Depends(get_session)):
     s.commit()
     return {"ok": True}
 
+@app.patch("/api/documents/{doc_id}/rename")
+def rename_document(doc_id: str, body: DocumentPatch, s: Session = Depends(get_session)):
+    doc = s.get(Document, doc_id)
+    if not doc:
+        raise HTTPException(404)
+    doc.title = body.title.strip()
+    s.add(doc)
+    s.commit()
+    s.refresh(doc)
+    return {"id": doc.id, "title": doc.title}
+
 # ── Routes: Shadow docs ────────────────────────────────────────────────────────
 
 @app.get("/api/documents/{doc_id}/shadow-docs")
@@ -424,15 +444,25 @@ def create_shadow_doc(doc_id: str, s: Session = Depends(get_session)):
     original = s.get(Document, doc_id)
     if not original:
         raise HTTPException(404)
-    date_str = datetime.utcnow().strftime('%Y-%m-%d')
+
+    # Version numbering: count existing shadows of this doc
+    existing_count = s.exec(
+        select(Document).where(Document.origin_document_id == doc_id)
+    ).all().__len__()
+    version_num = existing_count + 1
+    shadow_title = f"{original.title}-v{version_num}"
+
     shadow_doc = Document(
-        title=f"[Shadow] {original.title} — {date_str}",
+        title=shadow_title,
         subtitle=f"Shadow of '{original.title}'",
         footer=original.footer,
         origin_document_id=doc_id,
     )
     s.add(shadow_doc)
     s.flush()
+
+    # Build orig_node → shadow_node id map
+    full_id_map: dict = {}
     sections = s.exec(
         select(Section).where(Section.document_id == doc_id).order_by(col(Section.order))
     ).all()
@@ -440,7 +470,67 @@ def create_shadow_doc(doc_id: str, s: Session = Depends(get_session)):
         shadow_sec = Section(document_id=shadow_doc.id, order=orig_sec.order, title=orig_sec.title)
         s.add(shadow_sec)
         s.flush()
-        _copy_nodes_recursive(s, orig_sec.id, shadow_sec.id, None, None)
+        sec_map = _copy_nodes_recursive(s, orig_sec.id, shadow_sec.id, None, None)
+        full_id_map.update(sec_map)
+
+    orig_node_ids = list(full_id_map.keys())
+    if orig_node_ids:
+        all_anns = s.exec(
+            select(Annotation)
+            .where(Annotation.node_id.in_(orig_node_ids))
+            .where(Annotation.deleted_at == None)
+        ).all()
+
+        # Pass 1: copy ALL is_shadow annotations (user's explicit draft work) to shadow doc,
+        # then soft-delete them from the original.
+        shadow_bookmarked_nodes: set = set()
+        for ann in all_anns:
+            if not ann.is_shadow:
+                continue
+            shadow_node_id = full_id_map.get(ann.node_id)
+            if not shadow_node_id:
+                continue
+            new_ann = Annotation(
+                node_id=shadow_node_id,
+                type=ann.type,
+                range_start=ann.range_start,
+                range_end=ann.range_end,
+                color=ann.color,
+                selected_text=ann.selected_text,
+                note_body=ann.note_body,
+                is_shadow=False,
+            )
+            s.add(new_ann)
+            if ann.type == 'bookmark':
+                shadow_bookmarked_nodes.add(ann.node_id)
+            ann.deleted_at = datetime.utcnow()
+            s.add(ann)
+
+        # Pass 2: inherit original bookmarks and notes (position-independent, safe to copy).
+        # Highlights/crossouts are skipped — their text-range offsets are invalid after shadow edits.
+        # For bookmarks, skip if a shadow bookmark already exists for that node.
+        shadow_noted_nodes: set = set()  # track nodes already covered by shadow notes
+        for ann in all_anns:
+            if ann.is_shadow and ann.type == 'note':
+                shadow_noted_nodes.add(ann.node_id)
+
+        for ann in all_anns:
+            if ann.is_shadow or ann.type not in ('bookmark', 'note'):
+                continue
+            if ann.type == 'bookmark' and ann.node_id in shadow_bookmarked_nodes:
+                continue
+            if ann.type == 'note' and ann.node_id in shadow_noted_nodes:
+                continue
+            shadow_node_id = full_id_map.get(ann.node_id)
+            if not shadow_node_id:
+                continue
+            s.add(Annotation(
+                node_id=shadow_node_id,
+                type=ann.type,
+                note_body=ann.note_body,
+                is_shadow=False,
+            ))
+
     s.commit()
     return {"id": shadow_doc.id, "title": shadow_doc.title}
 
@@ -450,13 +540,30 @@ def load_shadow_doc_to_draft(doc_id: str, shadow_doc_id: str, s: Session = Depen
     shadow_doc = s.get(Document, shadow_doc_id)
     if not shadow_doc or shadow_doc.origin_document_id != doc_id:
         raise HTTPException(404)
+
+    # First clear any existing is_shadow annotations on the original doc
+    orig_node_ids = _get_all_node_ids(s, doc_id)
+    if orig_node_ids:
+        existing_shadow_anns = s.exec(
+            select(Annotation)
+            .where(Annotation.node_id.in_(orig_node_ids))
+            .where(Annotation.is_shadow == True)
+            .where(Annotation.deleted_at == None)
+        ).all()
+        for ann in existing_shadow_anns:
+            ann.deleted_at = datetime.utcnow()
+            s.add(ann)
+
+    # Build shadow_node → orig_node map and copy content
     updated_orig_ids: set = set()
+    shadow_node_to_orig: dict = {}
     shadow_sections = s.exec(select(Section).where(Section.document_id == shadow_doc_id)).all()
     for shadow_sec in shadow_sections:
         shadow_nodes = s.exec(select(Node).where(Node.section_id == shadow_sec.id)).all()
         for shadow_node in shadow_nodes:
             if not shadow_node.original_node_id:
                 continue
+            shadow_node_to_orig[shadow_node.id] = shadow_node.original_node_id
             updated_orig_ids.add(shadow_node.original_node_id)
             body = shadow_node.say or ""
             status = "complete" if body.strip() else "empty"
@@ -468,8 +575,27 @@ def load_shadow_doc_to_draft(doc_id: str, shadow_doc_id: str, s: Session = Depen
             else:
                 row = ShadowNote(node_id=shadow_node.original_node_id, body=body, status=status)
             s.add(row)
-    # Clear shadow notes for nodes not present in the shadow doc
-    orig_node_ids = _get_all_node_ids(s, doc_id)
+
+            # Restore shadow doc's annotations as is_shadow=True on the original nodes
+            saved_anns = s.exec(
+                select(Annotation)
+                .where(Annotation.node_id == shadow_node.id)
+                .where(Annotation.deleted_at == None)
+            ).all()
+            for saved_ann in saved_anns:
+                new_ann = Annotation(
+                    node_id=shadow_node.original_node_id,
+                    type=saved_ann.type,
+                    range_start=saved_ann.range_start,
+                    range_end=saved_ann.range_end,
+                    color=saved_ann.color,
+                    selected_text=saved_ann.selected_text,
+                    note_body=saved_ann.note_body,
+                    is_shadow=True,
+                )
+                s.add(new_ann)
+
+    # Clear shadow notes for nodes not in the shadow doc
     for nid in orig_node_ids:
         if nid not in updated_orig_ids:
             row = s.exec(select(ShadowNote).where(ShadowNote.node_id == nid)).first()
@@ -625,6 +751,17 @@ def clear_shadow_notes(doc_id: str, s: Session = Depends(get_session)):
             row.status = "empty"
             row.updated_at = datetime.utcnow()
             s.add(row)
+    # Soft-delete all is_shadow annotations for this doc's nodes
+    if node_ids:
+        shadow_anns = s.exec(
+            select(Annotation)
+            .where(Annotation.node_id.in_(node_ids))
+            .where(Annotation.is_shadow == True)
+            .where(Annotation.deleted_at == None)
+        ).all()
+        for ann in shadow_anns:
+            ann.deleted_at = datetime.utcnow()
+            s.add(ann)
     s.commit()
     return {"ok": True}
 

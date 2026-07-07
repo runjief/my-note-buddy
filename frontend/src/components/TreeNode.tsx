@@ -72,7 +72,7 @@ export function TreeNodeComponent({
     })
     // Auto-show notepad when expanding a node that has notes
     if (!isOpen && hasNote && state.notepadNodeId !== node.id) {
-      const top = kwRowRef.current?.getBoundingClientRect().top ?? 120
+      const top = window.innerHeight / 2 - 190
       dispatch({ type: 'SET_NOTEPAD', nodeId: node.id, top })
     }
   }

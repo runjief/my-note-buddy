@@ -15,6 +15,11 @@ async function req<T>(path: string, options?: RequestInit): Promise<T> {
 export const listDocuments = () => req<DocumentSummary[]>('/documents')
 export const getDocument = (id: string) => req<DocumentFull>(`/documents/${id}`)
 export const deleteDocument = (id: string) => req(`/documents/${id}`, { method: 'DELETE' })
+export const renameDocument = (id: string, title: string) =>
+  req<{ id: string; title: string }>(`/documents/${id}/rename`, {
+    method: 'PATCH',
+    body: JSON.stringify({ title }),
+  })
 
 // Nodes
 export const patchNode = (id: string, kw?: string, say?: string) =>
