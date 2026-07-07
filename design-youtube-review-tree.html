@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>System design review tree</title>
+<!--
+  ============================================================================
+  SYSTEM DESIGN REVIEW TREE — TEMPLATE  (v1.0)
+  ============================================================================
+  用途：把一道系统设计题整理成"关键词 → 完整吟唱文案"逐层展开的复习树。
+  特性：单文件、无外部依赖、离线可用、自动深色模式。
+
+  使用方法：
+  1. 复制本文件，重命名为 design-<题目>-review-tree.html
+  2. 修改 <script> 里的 CONFIG（页面标题等）
+  3. 在 DATA 里填入内容 —— 这是唯一需要写内容的地方
+  4. 渲染代码（"内容区结束"之后的部分）不要动
+
+  交互规则（由渲染代码自动实现，写内容时需要按此设计）：
+  - 同级节点按数组顺序逐个浮现：展开第 n 个，第 n+1 个才出现
+  - 展开某节点时，其文案 + 第一个子节点同时出现
+  - 顶部按钮：Show all keywords（只出骨架）/ Expand all / Reset
+
+  内容写作规范（给未来的 Claude / Opus，也给人类作者）：
+  - kw  = 关键词：2~5 个英文单词，是"记忆钩子"而非答案本身。
+          合格标准：复习者看到它能想起"这一段在讲什么问题"，
+          但看不到"答案是什么"。
+          ✅ "The 10 MB problem"   ❌ "Use multipart upload to bypass 10MB limit"
+  - say = 吟唱文案：第一人称、面试口吻、可直接说出口的完整段落，
+          2~5 句。上一节点的 say 结尾应能自然衔接下一节点的 kw
+          （上句说完，下一个关键词接得上）。
+          常用句式："Let me start simple…" / "There's a glaring issue here…" /
+          "The fix is…" / "One open question…" / "Concretely…"
+  - children：节点内部的细节展开（如某方案的具体步骤），
+          与主线推进（同级下一个节点）区分开。主线用于"接下来发生什么"，
+          children 用于"这一步内部怎么做"。
+  - 一个 section = 面试答案的一个大阶段（Requirements / High-level design /
+          某个 Deep dive…），一般 3~7 个主线节点，嵌套不超过 3 层。
+  ============================================================================
+-->
+<style>
+  :root{
+    --bg:#faf9f5;
+    --surface:#ffffff;
+    --text:#1f1e1b;
+    --text-2:#6b6a64;
+    --text-3:#9b9a92;
+    --line:#e4e2da;
+    --line-strong:#cfcdc3;
+    --accent:#1d6f8b;
+    --accent-bg:#e3f0f4;
+    --accent-border:#b7d6e0;
+    --sub-bg:#f1f0ea;
+    --sub-border:#dddbd1;
+    --quote-border:#8fbccb;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#191917;
+      --surface:#21211e;
+      --text:#e8e6df;
+      --text-2:#a3a199;
+      --text-3:#7a786f;
+      --line:#33322e;
+      --line-strong:#4a4842;
+      --accent:#7fc2d6;
+      --accent-bg:#173743;
+      --accent-border:#2b586a;
+      --sub-bg:#2a2a26;
+      --sub-border:#3c3b35;
+      --quote-border:#3e6a7a;
+    }
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,"PingFang SC","Microsoft YaHei",sans-serif;
+    line-height:1.7;
+  }
+  .wrap{max-width:760px;margin:0 auto;padding:40px 24px 80px}
+  header h1{font-size:24px;font-weight:600;margin:0 0 4px}
+  header p{margin:0;color:var(--text-2);font-size:14px}
+  .toolbar{display:flex;gap:8px;margin:20px 0 28px;flex-wrap:wrap}
+  .toolbar button{
+    font:inherit;font-size:13px;padding:6px 14px;border-radius:8px;cursor:pointer;
+    background:var(--surface);color:var(--text);border:1px solid var(--line-strong);
+  }
+  .toolbar button:hover{border-color:var(--accent);color:var(--accent)}
+  .toolbar button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+  .section{margin:0 0 36px}
+  .section-title{
+    display:inline-flex;align-items:center;gap:8px;
+    background:var(--surface);border:1px solid var(--line-strong);border-radius:10px;
+    padding:8px 16px;font-size:16px;font-weight:600;margin:0 0 10px;
+  }
+  .kids{margin-left:13px;padding-left:20px;border-left:1.5px solid var(--line-strong)}
+  .node{margin:8px 0}
+  .node[hidden]{display:none}
+  .kw{
+    font:inherit;display:inline-flex;align-items:center;gap:8px;cursor:pointer;
+    padding:7px 15px;border-radius:999px;font-size:14px;font-weight:600;
+    background:var(--accent-bg);color:var(--accent);border:1px solid var(--accent-border);
+    transition:transform .08s;
+  }
+  .kw:active{transform:scale(0.98)}
+  .kw:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .kw .chev{display:inline-block;transition:transform .15s;font-size:12px;line-height:1}
+  .node.open>.kw .chev{transform:rotate(90deg)}
+  .depth-2 .kw, .depth-3 .kw{
+    background:var(--sub-bg);color:var(--text);border-color:var(--sub-border);
+  }
+  .say{
+    display:none;margin:10px 0 6px 8px;padding:10px 16px;max-width:600px;
+    border-left:2.5px solid var(--quote-border);
+    font-family:Georgia,"Times New Roman","Songti SC",serif;
+    font-size:15px;line-height:1.75;color:var(--text);
+  }
+  .say .lbl{
+    display:block;font-size:11.5px;letter-spacing:.05em;
+    text-transform:uppercase;color:var(--text-3);margin-bottom:4px;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  }
+  .node.open>.say{display:block}
+  footer{margin-top:48px;font-size:12.5px;color:var(--text-3);border-top:1px solid var(--line);padding-top:16px}
+  @media (prefers-reduced-motion: reduce){
+    .kw,.kw .chev{transition:none}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1 id="page-title"></h1>
+    <p id="page-subtitle"></p>
+  </header>
+
+  <div class="toolbar">
+    <button id="btn-skeleton" title="浮现全部关键词但不展开文案">Show all keywords</button>
+    <button id="btn-expand" title="展开全部文案">Expand all</button>
+    <button id="btn-reset" title="全部收起并重新隐藏，用于自测">Reset</button>
+  </div>
+
+  <main id="tree"></main>
+
+  <footer id="page-footer"></footer>
+</div>
+
+<script>
+/* ==========================================================================
+   ★ 内容区 —— 只修改 CONFIG 和 DATA ★
+   ========================================================================== */
+const CONFIG = {
+  "title": "Design YouTube — review tree",
+  "subtitle": "点关键词展开该段完整吟唱文案，同时浮现下一个关键词。先自己回忆，再展开对答案。",
+  "footer": "Source: Hello Interview — \"How to design YouTube\". Keywords are memory cues; serif text is the full spoken script."
+};
+
+const DATA = [
+  {
+    "title": "Part 1 · The framework",
+    "nodes": [
+      {
+        "kw": "Requirements first",
+        "say": "Whenever I get a system design question, I start with requirements. Functional requirements are the features — the 'users should be able to' statements. Non-functional requirements are the qualities of the system: scalability, low latency, reliability, fault tolerance, and so on."
+      },
+      {
+        "kw": "Core entities",
+        "say": "Next come the core entities — the nouns of the system, the data that gets persisted and exchanged. If we had tables, these would be the tables themselves; on something like Twitter they'd be a post and a user."
+      },
+      {
+        "kw": "The API",
+        "say": "Then the API — the contract with our users. These are the external endpoints people call to interface with the system, and they usually exchange exactly those core entities."
+      },
+      {
+        "kw": "High-level design",
+        "say": "With the API in place I draw the high-level design. Its only goal is to satisfy the functional requirements — a simple design that delivers the features, with no worry about scale or latency just yet."
+      },
+      {
+        "kw": "Deep dives",
+        "say": "Then the fun part: deep dives. I go one by one through the non-functional requirements and upgrade the design until the system really is scalable, low latency, fault tolerant — whatever qualities we listed."
+      },
+      {
+        "kw": "Close the loop",
+        "say": "And at the very end I come back to the requirements and check them off one by one. If every functional and non-functional requirement is met, we're feeling really good."
+      }
+    ]
+  },
+  {
+    "title": "Part 2 · Requirements",
+    "nodes": [
+      {
+        "kw": "Two user features",
+        "say": "For YouTube the functional requirements are refreshingly short: users should be able to upload videos, and users should be able to watch — or stream — videos. Things like comments, likes, and privacy settings I'll explicitly put out of scope."
+      },
+      {
+        "kw": "Ask about scale",
+        "say": "Before the non-functional requirements, it's smart to ask the interviewer about scale. Here we're working with about 1 million uploads per day, about 100 million daily active users, and — this will end up mattering a lot — a max video size of 256 GB, or 12 hours, which is true of real YouTube."
+      },
+      {
+        "kw": "CAP with a user story",
+        "say": "First, CAP theorem — partition tolerance is a given in a distributed system, so is it availability or consistency? Concretely: if I upload a video in Germany, does a user in the US need to see it instantly, or get an error? Of course not — it's fine if it takes seconds or even minutes to propagate. So we prioritize availability over consistency, and video uploads are eventually consistent."
+      },
+      {
+        "kw": "Large videos, called out",
+        "say": "Since 256 GB is a ton of data, I'll call it out as its own requirement: we need to support uploading and streaming of large videos. That's going to be an interesting challenge worth its own deep dive."
+      },
+      {
+        "kw": "Quantify low latency",
+        "say": "Streaming should be low latency — and I'll quantify that: when I click a video I want pixels on screen within, say, 500 milliseconds. Importantly, that should hold even in low-bandwidth environments, like bad café Wi-Fi."
+      },
+      {
+        "kw": "Scalability target",
+        "say": "And finally scalability: the system should scale to that 1 million uploads a day and 100 million views. At the end of the design we'll come back and verify every one of these."
+      }
+    ]
+  },
+  {
+    "title": "Part 3 · Entities and API",
+    "nodes": [
+      {
+        "kw": "Three nouns",
+        "say": "Our core entities: a video, the video's metadata, and a user. I'm deliberately listing video and metadata as two separate entities.",
+        "children": [
+          {
+            "kw": "Why split video and metadata",
+            "say": "A video is really two things: the raw bytes you actually watch, and the metadata — the title, description, upload status. These get stored and handled completely differently, so I split them from the start."
+          }
+        ]
+      },
+      {
+        "kw": "Defer the schema",
+        "say": "Some guides recommend writing the full schema this early. I find I don't have the context yet, so I'll orient around the entities now and go into schema detail during the high-level design — and I'll proactively tell my interviewer that's the plan."
+      },
+      {
+        "kw": "APIs from requirements",
+        "say": "For the API I simply walk the functional requirements one by one and make sure each has an endpoint to satisfy it.",
+        "children": [
+          {
+            "kw": "POST /videos",
+            "say": "For upload, a POST to the videos resource, passing the raw bytes plus the video metadata in the body. If you've uploaded large files before you'll know this won't survive 256 GB — post bodies have size limits — but it's a reasonable place to start, and we'll come back and improve it."
+          },
+          {
+            "kw": "GET /videos/:id",
+            "say": "For watching, a GET by video ID that returns the raw bytes plus the metadata — the title, description, the creator. Again a deliberately basic version that we'll refine."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "title": "Part 4 · Upload path",
+    "nodes": [
+      {
+        "kw": "Baseline architecture",
+        "say": "Let me start simple. The client talks to an API gateway, whose main job is routing to the right microservice, plus middleware like authentication and rate limiting. It routes to a single video service, which stores our two things separately.",
+        "children": [
+          {
+            "kw": "Two data stores",
+            "say": "The video metadata goes into a metadata DB — could be DynamoDB, could be Postgres, there aren't strong requirements at one million uploads a day. The raw video bytes go into blob storage like S3, because blob storage is much cheaper for large binary data."
+          }
+        ]
+      },
+      {
+        "kw": "The 10 MB problem",
+        "say": "There's a glaring issue here, so I'll take it head-on now instead of saving it for a deep dive: most components cap the size of a POST body — an AWS API Gateway caps it at 10 MB — so there's no way to push a 256 GB video through this path."
+      },
+      {
+        "kw": "Upload directly to S3",
+        "say": "We could chunk ourselves, stitch in the video service, and upload to S3 — but the more common pattern is to have the client upload directly to S3 using multipart upload (GCS has the equivalent, resumable uploads). That way these large byte streams never flow through the gateway or the service, which saves both network cost and compute.",
+        "children": [
+          {
+            "kw": "Presigned URLs",
+            "say": "Concretely, the client now POSTs only the metadata — importantly including the video size. We store it with status 'pending', then tell S3 'I'm ready to multipart-upload a file of this size', and S3 hands back a set of presigned URLs."
+          },
+          {
+            "kw": "Chunk and PUT",
+            "say": "The client chunks the file — the AWS SDK's multipart upload API does this chunking for you — and PUTs each chunk to its presigned URL. S3 stitches the chunks back into the fully formed video, and we've bypassed the 10 MB gateway limit entirely."
+          }
+        ]
+      },
+      {
+        "kw": "S3 notifications",
+        "say": "One open question: our metadata has an upload status and an S3 URL — how do they get updated? S3 tells the client when the upload completes, and the client could tell our video service. But then we're trusting the client, which could lie or just fail to report, leaving us in an inconsistent state. So the best practice is S3 event notifications: completion triggers a worker — a Lambda or any server — that updates the metadata status to 'uploaded' and records the S3 URL."
+      }
+    ]
+  },
+  {
+    "title": "Part 5 · Watch path, v1",
+    "nodes": [
+      {
+        "kw": "Naive download",
+        "say": "The simplest watch flow: the client GETs the video ID, we look up the metadata, return the name, description, and the S3 URL, and the client downloads the video directly from S3."
+      },
+      {
+        "kw": "Why full-file fails",
+        "say": "Even a 10 GB video — well under our 256 GB max — breaks this. The download takes ages before you see anything, the client needs that much free memory just sitting there, and the connection must stay stable for the entire download. The killer is the first one: I don't want to wait minutes or hours for the first pixel — I click, I want video."
+      },
+      {
+        "kw": "Same intuition as upload",
+        "say": "The intuition here mirrors the upload side exactly: serve the client chunks of the video instead of the entire file. Let's make that our first deep dive."
+      }
+    ]
+  },
+  {
+    "title": "Part 6 · Deep dive: large videos",
+    "nodes": [
+      {
+        "kw": "The chunker",
+        "say": "Once the full video lands in S3, an S3 notification — the same mechanism as before — triggers a set of workers I'll call the chunker."
+      },
+      {
+        "kw": "2–10 second segments",
+        "say": "The chunker splits the video into small clips of roughly 2 to 10 seconds — the smaller the better for startup, depending on the streaming technology — cut precisely at video keyframes so playback is clean. It stores those segments back into S3."
+      },
+      {
+        "kw": "Ordered chunk list",
+        "say": "It also updates the video metadata: alongside what I'll now call the full S3 URL, we store an ordered list of S3 URLs, one per chunk."
+      },
+      {
+        "kw": "First chunk first",
+        "say": "Now when a client wants to watch, it gets that ordered list from the metadata and requests the chunks in 2-second increments. Instead of waiting on a 10 GB file, we download just the first chunk — pixels on screen ASAP — and fetch the rest in the background."
+      },
+      {
+        "kw": "Why chunk twice",
+        "say": "You might ask: didn't we already chunk on upload, have S3 stitch it back together, and now we re-chunk — what's going on? The two chunkings optimize different things. Upload chunks are large, 5 to 10 megabytes, with arbitrary byte offsets, tuned to minimize HTTP request overhead. Streaming segments are tiny 2-to-10-second clips, keyframe-aligned, tuned for quick start and adaptability."
+      }
+    ]
+  },
+  {
+    "title": "Part 7 · Deep dive: latency and bandwidth",
+    "nodes": [
+      {
+        "kw": "The 2 Mbps thought experiment",
+        "say": "Chunking got us quick first pixels, but not in every bandwidth. Imagine watching from bad café Wi-Fi or 3G at 2 megabits per second: even a single 2-second chunk of a 4K video could take 20 seconds to download. We've blown our 500-millisecond budget, so we need transcoding — multiple bitrates and resolutions of the same video."
+      },
+      {
+        "kw": "What's in a video file",
+        "say": "Quick background — you wouldn't need to recite this in an interview. The mp4 or mov container we store in S3 holds a video codec, which compresses raw video by storing occasional complete keyframes, the motion changes between frames, and instructions for reconstructing the rest; an audio codec doing the same for sound; and playback parameters like bitrate, resolution, frame rate, and duration."
+      },
+      {
+        "kw": "Transcoding fan-out",
+        "say": "So after chunking, each chunk fans out in parallel to transcoders — one producing 4K, one 1080p, one 720p, all the way down to 240p — altering the codec, bitrate, and resolution. Each output is stored back in S3."
+      },
+      {
+        "kw": "The manifest file",
+        "say": "The metadata now maps each resolution to its ordered list of chunk URLs. In video streaming this mapping has a name: the manifest file. It's just a file — JSON, XML, YAML — and it can itself be stored in S3 or, better, right in the CDN."
+      },
+      {
+        "kw": "Adaptive bitrate",
+        "say": "On the client we do adaptive bitrate: the player checks network conditions, grabs the first couple of 4K chunks, then keeps re-measuring and fetches the next chunks at whatever resolution currently fits. Start a video at home on a 500-megabit connection, walk out to 3G, and the player quietly hands you 720p chunks mid-stream."
+      },
+      {
+        "kw": "Bring in a CDN",
+        "say": "Our remaining latency bottleneck is round-tripping to S3 — maybe your user is in Germany and the bucket is in US West, and that's a long way for bytes to travel. So we add a CDN: servers close to users, operating as a cache for the popular video chunks and the manifest files. Now playback is so quick we might show pixels before the title and description even arrive."
+      },
+      {
+        "kw": "HLS and DASH",
+        "say": "Everything we just designed — segmentation, manifest formats, multiple qualities, adaptive streaming over standard HTTP and CDNs — has already been done by the common streaming protocols: HLS from Apple, and DASH, the main open-source one. Do you need to know the names? No — even a staff candidate doesn't. What matters is the components: chunk asynchronously, transcode, fetch a manifest, then adaptively fetch chunks based on network conditions."
+      }
+    ]
+  },
+  {
+    "title": "Part 8 · Scale check",
+    "nodes": [
+      {
+        "kw": "Stateless services",
+        "say": "Time to walk the design for bottlenecks. The video service is stateless, so it scales horizontally any number of times; the API gateway doubles as a load balancer — or put one in front if your gateway can't. Classic horizontal scaling, and honestly not the most interesting part."
+      },
+      {
+        "kw": "S3 is a non-issue",
+        "say": "S3 is, in quotes, infinitely scalable. Huge amounts of video data live there and we'll never hit a limit worth designing around."
+      },
+      {
+        "kw": "Tiny metadata",
+        "say": "The metadata is only about a kilobyte per video, because the bulky part — the chunk mapping, our manifest — lives in S3 and the CDN. At 1 million uploads a day that's tiny; it would honestly fit on a single Postgres instance for many years, or a single DynamoDB shard."
+      },
+      {
+        "kw": "If asked about sharding",
+        "say": "If the interviewer pushes on sharding anyway: partition by video ID, with a sort key on time so the combination is unique and we can fetch videos ordered by recency, plus a global secondary index on user ID to list all videos by a creator — though that was outside our current requirements."
+      },
+      {
+        "kw": "Autoscaling workers",
+        "say": "The chunker and transcoders are stateless workers too, so they scale horizontally. In practice you configure the containers to autoscale on thresholds — say above 80 percent memory or 70 percent CPU, add more instances."
+      },
+      {
+        "kw": "CDN is the cost center",
+        "say": "The CDN is the expensive bit — a business tradeoff more than a technical one, it depends what we can afford. If we're actually YouTube, we have huge CDNs everywhere and life is good."
+      },
+      {
+        "kw": "Walk the checklist",
+        "say": "Finally I close the loop against the requirements. Can users upload? Yes. Watch and stream? Yes. Availability over consistency — uploads eventually consistent? Yes. 256 GB supported, via chunking on both upload and download? Yes. Low latency streaming even on low bandwidth, via transcoding and adaptive bitrate? Yes. Scale to 1 million uploads and 100 million views? Yes. That's a design that passes the interview."
+      }
+    ]
+  },
+  {
+    "title": "Part 9 · Level expectations",
+    "nodes": [
+      {
+        "kw": "Mid-level bar",
+        "say": "A mid-level candidate likely won't have the chunking intuition upfront — the interviewer will probe: 'downloading a 10 GB video takes this long, can you do better?' You should problem-solve your way to chunking. You might never reach transcoding, and realizing at a high level that different resolutions could serve different bandwidths — even without knowing the word transcoder — would already be fantastic."
+      },
+      {
+        "kw": "Senior bar",
+        "say": "At senior I expect the chunking intuition without probing, and you should know multipart upload — it's the standard pattern for uploading any large media. Transcoding can be something I hint at, but you must grasp the idea, and you should handle my CDN and manifest questions competently even if you've never heard the word manifest."
+      },
+      {
+        "kw": "Staff bar",
+        "say": "At staff you get here largely proactively: the chunking, the transcoding, the intuition to split video bytes from metadata. Ideally you teach me something along the way — how to handle this processing DAG, retries and failures, what happens if the chunker dies mid-video. HLS and DASH by name? Still not required — only someone who's worked on streaming products would know them."
+      }
+    ]
+  }
+];
+/* ========================== ★ 内容区结束 ★ ==============================
+   以下为渲染代码，请勿修改
+   ========================================================================== */
+
+function buildNode(node, depth, isFirstSibling){
+  const el = document.createElement("div");
+  el.className = "node depth-" + depth;
+  if(!isFirstSibling) el.hidden = true;
+
+  const btn = document.createElement("button");
+  btn.className = "kw";
+  btn.innerHTML = '<span class="chev">▸</span>' + escapeHtml(node.kw);
+  el.appendChild(btn);
+
+  const say = document.createElement("div");
+  say.className = "say";
+  say.innerHTML = '<span class="lbl">Say it</span>' + escapeHtml(node.say);
+  el.appendChild(say);
+
+  if(node.children && node.children.length){
+    const kids = document.createElement("div");
+    kids.className = "kids";
+    node.children.forEach(c => kids.appendChild(buildNode(c, depth + 1, false)));
+    el.appendChild(kids);
+  }
+
+  btn.addEventListener("click", () => {
+    const firstOpen = !el.classList.contains("seen");
+    el.classList.toggle("open");
+    if(firstOpen){
+      el.classList.add("seen");
+      const sib = el.nextElementSibling;
+      if(sib && sib.classList.contains("node")) sib.hidden = false;
+      const kids = el.querySelector(":scope > .kids");
+      if(kids){
+        const firstKid = kids.querySelector(":scope > .node");
+        if(firstKid) firstKid.hidden = false;
+      }
+    }
+  });
+  return el;
+}
+
+function escapeHtml(s){
+  return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+
+function render(){
+  document.getElementById("page-title").textContent = CONFIG.title;
+  document.getElementById("page-subtitle").textContent = CONFIG.subtitle;
+  document.getElementById("page-footer").textContent = CONFIG.footer;
+  document.title = CONFIG.title;
+
+  const root = document.getElementById("tree");
+  root.innerHTML = "";
+  DATA.forEach(section => {
+    const sec = document.createElement("section");
+    sec.className = "section";
+    const h = document.createElement("h2");
+    h.className = "section-title";
+    h.textContent = section.title;
+    sec.appendChild(h);
+    const kids = document.createElement("div");
+    kids.className = "kids";
+    section.nodes.forEach((n, i) => kids.appendChild(buildNode(n, 1, i === 0)));
+    sec.appendChild(kids);
+    root.appendChild(sec);
+  });
+}
+
+document.getElementById("btn-skeleton").addEventListener("click", () => {
+  document.querySelectorAll(".node").forEach(n => { n.hidden = false; n.classList.add("seen"); });
+});
+document.getElementById("btn-expand").addEventListener("click", () => {
+  document.querySelectorAll(".node").forEach(n => { n.hidden = false; n.classList.add("seen","open"); });
+});
+document.getElementById("btn-reset").addEventListener("click", render);
+
+render();
+</script>
+</body>
+</html>
