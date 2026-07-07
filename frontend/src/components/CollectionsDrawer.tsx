@@ -1,15 +1,16 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react'
+import { Bookmark, FilePen, X } from 'lucide-react'
 import type { Annotation, DocumentFull, TreeNode } from '../types'
 import { useStore } from '../store'
 import * as api from '../api'
 
 type Tab = 'all' | 'highlight' | 'bookmark' | 'note'
 
-const TABS: { key: Tab; label: string; icon: string }[] = [
-  { key: 'all', label: 'All', icon: '' },
-  { key: 'highlight', label: 'Highlights', icon: '●' },
-  { key: 'bookmark', label: 'Bookmarks', icon: '★' },
-  { key: 'note', label: 'Notes', icon: '📝' },
+const TABS: { key: Tab; label: string; icon?: React.ReactNode }[] = [
+  { key: 'all', label: 'All' },
+  { key: 'highlight', label: 'Highlights', icon: <span style={{ fontSize: 10 }}>●</span> },
+  { key: 'bookmark', label: 'Bookmarks', icon: <Bookmark size={12} /> },
+  { key: 'note', label: 'Notes', icon: <FilePen size={12} /> },
 ]
 
 const HIGHLIGHT_COLORS: { value: string; label: string; swatch: string }[] = [
@@ -21,8 +22,10 @@ const HIGHLIGHT_COLORS: { value: string; label: string; swatch: string }[] = [
   { value: 'pink',   label: 'Pink',       swatch: '#f48fb1' },
 ]
 
-const TYPE_ICON: Record<string, string> = {
-  highlight: '●', bookmark: '★', note: '📝',
+const TYPE_ICON: Record<string, React.ReactNode> = {
+  highlight: <span style={{ fontSize: 10 }}>●</span>,
+  bookmark:  <Bookmark size={13} />,
+  note:      <FilePen size={13} />,
 }
 
 const COLOR_STYLE: Record<string, string> = {
@@ -147,7 +150,7 @@ export function CollectionsDrawer({ doc, onClose, onJump }: Props) {
       <div className="drawer-header">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h3>Collections</h3>
-          <button className="btn btn-sm" style={{ border: 'none' }} onClick={onClose}>✕</button>
+          <button className="btn btn-sm icon-btn" style={{ border: 'none' }} onClick={onClose}><X size={14} /></button>
         </div>
       </div>
       <div className="drawer-tabs">
@@ -157,7 +160,7 @@ export function CollectionsDrawer({ doc, onClose, onJump }: Props) {
             className={`drawer-tab ${activeTab === t.key ? 'active' : ''}`}
             onClick={() => handleTabChange(t.key)}
           >
-            {t.icon && <span style={{ marginRight: 3 }}>{t.icon}</span>}
+            {t.icon && <span style={{ marginRight: 4, display: 'flex', alignItems: 'center' }}>{t.icon}</span>}
             {t.label}
           </button>
         ))}
@@ -195,11 +198,11 @@ export function CollectionsDrawer({ doc, onClose, onJump }: Props) {
                 <div className="ci-breadcrumb">{breadcrumb} › {kw}</div>
               </div>
               <button
-                className="ci-remove"
+                className="ci-remove icon-btn"
                 onClick={e => { e.stopPropagation(); handleRemove(ann) }}
                 title="Remove"
               >
-                ✕
+                <X size={12} />
               </button>
             </div>
           )

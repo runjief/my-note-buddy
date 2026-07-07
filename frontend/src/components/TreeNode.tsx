@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react'
+import { Bookmark, BookmarkCheck, FilePen, FileText, ChevronRight, Pencil } from 'lucide-react'
 import type { TreeNode as TNode, Annotation, PendingSelection } from '../types'
 import { useStore } from '../store'
 import { AnnotatedText } from './AnnotatedText'
@@ -200,26 +201,28 @@ export function TreeNodeComponent({
           />
         ) : (
           <button className="kw-btn" onClick={handleToggle}>
-            <span className="chev">▸</span>
+            <ChevronRight size={13} className="chev" />
             {node.kw}
           </button>
         )}
 
         <div className="node-actions">
-          <button title="Edit keyword" onClick={() => setEditingKw(true)}>✏</button>
+          <button title="Edit keyword" onClick={() => setEditingKw(true)}>
+            <Pencil size={13} />
+          </button>
           <button
             title={isBookmarked ? 'Remove bookmark' : 'Bookmark'}
             className={isBookmarked ? 'active-icon' : ''}
             onClick={handleBookmark}
           >
-            {isBookmarked ? '★' : '☆'}
+            {isBookmarked ? <BookmarkCheck size={14} /> : <Bookmark size={14} />}
           </button>
           <button
             title="Notepad"
             className={state.notepadNodeId === node.id ? 'active-icon' : ''}
             onClick={handleNotepad}
           >
-            {hasNote ? '📝' : '📄'}
+            {hasNote ? <FilePen size={14} /> : <FileText size={14} />}
           </button>
         </div>
 

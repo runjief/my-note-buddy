@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { createPortal } from 'react-dom'
+import { Pencil, Save, Search, Heart, Trash2, ArrowLeft, Download, GitCompare, RotateCcw, ArrowLeftRight, Eye, X as XIcon } from 'lucide-react'
 import type {
   DocumentSummary, DocumentFull,
   TreeNode, Section, ShadowDocSummary,
@@ -159,7 +160,7 @@ function DocumentList({ onOpen }: { onOpen: (id: string) => void }) {
         {isShadow && <span className="shadow-doc-tag">Shadow</span>}
         <span className="doc-title-text">{title}</span>
         <button className="doc-rename-btn" title="Rename"
-          onClick={e => startRename(e, id, title)}>✎</button>
+          onClick={e => startRename(e, id, title)}><Pencil size={12} /></button>
       </span>
     )
   }
@@ -581,7 +582,7 @@ function DocView({ docId, onBack }: { docId: string; onBack: () => void; onNavig
     <div className="doc-view">
       {/* ── Header ── */}
       <div className="doc-header">
-        <button className="btn btn-sm" onClick={onBack}>← Back</button>
+        <button className="btn btn-sm" onClick={onBack}><ArrowLeft size={13} />Back</button>
         <h1>
           {isCurrentShadow && <span className="shadow-doc-tag" style={{ marginRight: 8 }}>Shadow</span>}
           {doc.title.replace(/^\[Shadow\]\s*/, '')}
@@ -594,7 +595,7 @@ function DocView({ docId, onBack }: { docId: string; onBack: () => void; onNavig
               onClick={handleToggleShadow}
               title="Shadow mode: write from memory"
             >
-              ✍ Shadow
+              <Eye size={13} />Shadow
             </button>
           )}
           {state.shadowMode && !compareMode && (
@@ -603,12 +604,12 @@ function DocView({ docId, onBack }: { docId: string; onBack: () => void; onNavig
                 className={`btn btn-sm ${state.syncScroll ? 'active' : ''}`}
                 onClick={() => dispatch({ type: 'TOGGLE_SYNC_SCROLL' })}
                 title="Sync scroll"
-              >⇄</button>
+              ><ArrowLeftRight size={13} /></button>
               <button
                 className="btn btn-sm btn-primary"
                 onClick={handleSaveShadow}
                 title="Save as independent document"
-              >💾 Save as doc</button>
+              ><Save size={13} />Save as doc</button>
             </>
           )}
 
@@ -622,7 +623,7 @@ function DocView({ docId, onBack }: { docId: string; onBack: () => void; onNavig
                   onClick={compareMode ? exitCompareMode : () => enterCompareWith(doc.origin_document_id!)}
                   title={compareMode ? 'Exit compare' : 'Compare with original'}
                 >
-                  {compareMode ? '✕ Compare' : '⇔ Original'}
+                  {compareMode ? <><XIcon size={12} />Compare</> : <><GitCompare size={12} />Original</>}
                 </button>
               ) : shadowDocs.length > 0 ? (
                 // Normal doc with saved shadows → dropdown
@@ -631,7 +632,7 @@ function DocView({ docId, onBack }: { docId: string; onBack: () => void; onNavig
                     className={`btn btn-sm ${compareMode ? 'active' : ''}`}
                     onClick={compareMode ? exitCompareMode : () => setShowCompareDropdown(v => !v)}
                   >
-                    {compareMode ? '✕ Compare' : '⇔ Compare'}
+                    {compareMode ? <><XIcon size={12} />Compare</> : <><GitCompare size={12} />Compare</>}
                   </button>
                   {showCompareDropdown && (
                     <div className="compare-dropdown">
@@ -652,19 +653,21 @@ function DocView({ docId, onBack }: { docId: string; onBack: () => void; onNavig
               className={`btn btn-sm ${state.syncScroll ? 'active' : ''}`}
               onClick={() => dispatch({ type: 'TOGGLE_SYNC_SCROLL' })}
               title="Sync scroll"
-            >⇄</button>
+            ><ArrowLeftRight size={13} /></button>
           )}
 
           <div className="divider" />
-          <button className="btn btn-sm" onClick={() => dispatch({ type: 'TOGGLE_SEARCH' })}>
-            🔍 <span style={{ color: 'var(--text-3)', fontSize: 11 }}>⌘K</span>
+          <button className="btn btn-sm" onClick={() => dispatch({ type: 'TOGGLE_SEARCH' })} title="Search (⌘K)">
+            <Search size={13} />
+            <span style={{ color: 'var(--text-3)', fontSize: 11 }}>⌘K</span>
           </button>
           <button
             className={`btn btn-sm ${state.collectionsOpen ? 'active' : ''}`}
             onClick={() => dispatch({ type: 'TOGGLE_COLLECTIONS' })}
-          >❤</button>
+            title="Collections"
+          ><Heart size={13} /></button>
           <div className="divider" />
-          <button className="btn btn-sm" onClick={handleExport} title="Export as JSON">↓ Export</button>
+          <button className="btn btn-sm" onClick={handleExport} title="Export as JSON"><Download size={13} />Export</button>
         </div>
       </div>
 
@@ -772,17 +775,17 @@ function DocView({ docId, onBack }: { docId: string; onBack: () => void; onNavig
             </p>
             <div className="modal-options">
               <button className="modal-option" onClick={handleContinueShadow}>
-                <span className="modal-option-icon">✏</span>
+                <span className="modal-option-icon"><Pencil size={15} /></span>
                 <span>Continue current draft</span>
               </button>
               {shadowDocs.map(sd => (
                 <button key={sd.id} className="modal-option" onClick={() => handleLoadShadowDoc(sd.id)}>
-                  <span className="modal-option-icon">📂</span>
+                  <span className="modal-option-icon"><Eye size={14} /></span>
                   <span>Load: <strong>{sd.title.replace(/^\[Shadow\]\s*/, '')}</strong></span>
                 </button>
               ))}
               <button className="modal-option modal-option-danger" onClick={handleFreshShadow}>
-                <span className="modal-option-icon">🗑</span>
+                <span className="modal-option-icon"><Trash2 size={15} /></span>
                 <span>Start fresh (clear current draft)</span>
               </button>
             </div>
@@ -802,7 +805,7 @@ function DocView({ docId, onBack }: { docId: string; onBack: () => void; onNavig
             const last = state.undoStack[state.undoStack.length - 1]
             if (last) { last.undo().catch(console.error); dispatch({ type: 'POP_UNDO' }) }
           }}>Undo</button>
-          <button onClick={() => dispatch({ type: 'CLEAR_UNDO_TOAST' })}>✕</button>
+          <button onClick={() => dispatch({ type: 'CLEAR_UNDO_TOAST' })}><XIcon size={13} /></button>
         </div>
       )}
 
@@ -810,7 +813,7 @@ function DocView({ docId, onBack }: { docId: string; onBack: () => void; onNavig
       {toast && (
         <div className="undo-toast" style={{ bottom: state.lastUndo ? 72 : 24, maxWidth: 480, whiteSpace: 'normal', textAlign: 'center' }}>
           <span>{toast}</span>
-          <button onClick={() => setToast(null)}>✕</button>
+          <button onClick={() => setToast(null)}><XIcon size={13} /></button>
         </div>
       )}
     </div>

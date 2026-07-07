@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react'
+import { Search } from 'lucide-react'
 import type { DocumentFull, TreeNode } from '../types'
 import { useStore } from '../store'
 
@@ -109,7 +110,7 @@ export function SearchOverlay({ doc, onClose, onJump }: Props) {
     <div className="search-backdrop" onClick={e => { if (e.target === e.currentTarget) onClose() }}>
       <div className="search-box">
         <div className="search-input-row">
-          <span style={{ color: 'var(--text-3)', fontSize: 16 }}>🔍</span>
+          <Search size={15} style={{ color: 'var(--text-3)', flexShrink: 0 }} />
           <input
             ref={inputRef}
             placeholder="Search keywords, content and notes…"
