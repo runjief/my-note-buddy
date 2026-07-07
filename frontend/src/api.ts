@@ -44,7 +44,7 @@ export const createAnnotation = (
     is_shadow?: boolean
   }
 ) => req<Annotation>(`/nodes/${nodeId}/annotations`, { method: 'POST', body: JSON.stringify(body) })
-export const patchAnnotation = (id: string, body: { note_body?: string; color?: string }) =>
+export const patchAnnotation = (id: string, body: { note_body?: string; color?: string; type?: string }) =>
   req<Annotation>(`/annotations/${id}`, { method: 'PATCH', body: JSON.stringify(body) })
 export const deleteAnnotation = (id: string) =>
   req<{ id: string }>(`/annotations/${id}`, { method: 'DELETE' })

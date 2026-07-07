@@ -318,8 +318,6 @@ del.xout {
 .notepad-panel {
   position: fixed;
   right: 20px;
-  width: 280px;
-  max-height: 70vh;
   background: var(--surface);
   border: 1px solid var(--line-strong);
   border-radius: 12px;
@@ -328,6 +326,7 @@ del.xout {
   flex-direction: column;
   z-index: 200;
   overflow: hidden;
+  /* width/max-height are set via inline style from state */
 }
 
 .notepad-header {
@@ -373,6 +372,19 @@ del.xout {
   justify-content: flex-end;
   margin-top: 4px;
 }
+
+.notepad-resize-handle {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 16px;
+  height: 16px;
+  cursor: se-resize;
+  opacity: 0.4;
+  background: linear-gradient(135deg, transparent 40%, var(--text-3) 40%, var(--text-3) 55%, transparent 55%,
+    transparent 65%, var(--text-3) 65%, var(--text-3) 80%, transparent 80%);
+}
+.notepad-resize-handle:hover { opacity: 0.8; }
 
 .notepad-add-btn {
   width: 100%;

@@ -269,7 +269,8 @@ function DocView({ docId, onBack }: { docId: string; onBack: () => void; onNavig
 
   // ── Sync scroll ───────────────────────────────────────────────
   useEffect(() => {
-    if ((!state.syncScroll && !compareMode) || (!state.shadowMode && !compareMode)) return
+    const active = state.shadowMode || compareMode
+    if (!active || !state.syncScroll) return   // respect toggle in both shadow and compare modes
     const left  = leftScrollRef.current
     const right = rightScrollRef.current
     if (!left || !right) return
@@ -350,25 +351,43 @@ function DocView({ docId, onBack }: { docId: string; onBack: () => void; onNavig
 
   const exitCompareMode = () => { setCompareMode(false); setCompareDoc(null) }
 
-  // ── Annotation creation ───────────────────────────────────────
+  // ── Click outside toolbar → dismiss ──────────────────────────
+  useEffect(() => {
+    if (!state.pendingSelection) return
+    const handler = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement).closest('.selection-toolbar')) {
+        dispatch({ type: 'SET_SELECTION', sel: null })
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [state.pendingSelection, dispatch])
+
+  // ── Annotation creation / update ──────────────────────────────
   const handleHighlight = useCallback(async (color: string) => {
     const sel = state.pendingSelection
-    if (!sel || sel.existingAnnId) return
+    if (!sel) return
     try {
-      const ann = await api.createAnnotation(sel.nodeId, {
-        type: 'highlight', range_start: sel.start, range_end: sel.end,
-        color, selected_text: sel.text.slice(0, 200),
-        is_shadow: sel.isShadowContext ?? false,
-      })
-      dispatch({ type: 'ADD_ANNOTATION', ann })
-      dispatch({
-        type: 'PUSH_UNDO',
-        action: {
-          description: `Highlight "${sel.text.slice(0, 20)}…"`,
-          undo: async () => { await api.deleteAnnotation(ann.id); dispatch({ type: 'REMOVE_ANNOTATION', annId: ann.id, nodeId: sel.nodeId }) },
-          redo: async () => { const r = await api.restoreAnnotation(ann.id); dispatch({ type: 'RESTORE_ANNOTATION', ann: r }) },
-        },
-      })
+      if (sel.existingAnnId) {
+        // Update existing annotation: change to highlight with new color
+        const updated = await api.patchAnnotation(sel.existingAnnId, { type: 'highlight', color })
+        dispatch({ type: 'UPDATE_ANNOTATION', ann: updated })
+      } else {
+        const ann = await api.createAnnotation(sel.nodeId, {
+          type: 'highlight', range_start: sel.start, range_end: sel.end,
+          color, selected_text: sel.text.slice(0, 200),
+          is_shadow: sel.isShadowContext ?? false,
+        })
+        dispatch({ type: 'ADD_ANNOTATION', ann })
+        dispatch({
+          type: 'PUSH_UNDO',
+          action: {
+            description: `Highlight "${sel.text.slice(0, 20)}…"`,
+            undo: async () => { await api.deleteAnnotation(ann.id); dispatch({ type: 'REMOVE_ANNOTATION', annId: ann.id, nodeId: sel.nodeId }) },
+            redo: async () => { const r = await api.restoreAnnotation(ann.id); dispatch({ type: 'RESTORE_ANNOTATION', ann: r }) },
+          },
+        })
+      }
     } catch (e) { console.error('Highlight failed:', e) }
     dispatch({ type: 'SET_SELECTION', sel: null })
     window.getSelection()?.removeAllRanges()
@@ -376,22 +395,28 @@ function DocView({ docId, onBack }: { docId: string; onBack: () => void; onNavig
 
   const handleCrossout = useCallback(async () => {
     const sel = state.pendingSelection
-    if (!sel || sel.existingAnnId) return
+    if (!sel) return
     try {
-      const ann = await api.createAnnotation(sel.nodeId, {
-        type: 'crossout', range_start: sel.start, range_end: sel.end,
-        selected_text: sel.text.slice(0, 200),
-        is_shadow: sel.isShadowContext ?? false,
-      })
-      dispatch({ type: 'ADD_ANNOTATION', ann })
-      dispatch({
-        type: 'PUSH_UNDO',
-        action: {
-          description: 'Crossout',
-          undo: async () => { await api.deleteAnnotation(ann.id); dispatch({ type: 'REMOVE_ANNOTATION', annId: ann.id, nodeId: sel.nodeId }) },
-          redo: async () => { const r = await api.restoreAnnotation(ann.id); dispatch({ type: 'RESTORE_ANNOTATION', ann: r }) },
-        },
-      })
+      if (sel.existingAnnId) {
+        // Update existing annotation: change to crossout
+        const updated = await api.patchAnnotation(sel.existingAnnId, { type: 'crossout', color: undefined })
+        dispatch({ type: 'UPDATE_ANNOTATION', ann: updated })
+      } else {
+        const ann = await api.createAnnotation(sel.nodeId, {
+          type: 'crossout', range_start: sel.start, range_end: sel.end,
+          selected_text: sel.text.slice(0, 200),
+          is_shadow: sel.isShadowContext ?? false,
+        })
+        dispatch({ type: 'ADD_ANNOTATION', ann })
+        dispatch({
+          type: 'PUSH_UNDO',
+          action: {
+            description: 'Crossout',
+            undo: async () => { await api.deleteAnnotation(ann.id); dispatch({ type: 'REMOVE_ANNOTATION', annId: ann.id, nodeId: sel.nodeId }) },
+            redo: async () => { const r = await api.restoreAnnotation(ann.id); dispatch({ type: 'RESTORE_ANNOTATION', ann: r }) },
+          },
+        })
+      }
     } catch (e) { console.error('Crossout failed:', e) }
     dispatch({ type: 'SET_SELECTION', sel: null })
     window.getSelection()?.removeAllRanges()

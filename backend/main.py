@@ -7,7 +7,7 @@ from typing import Optional, List
 from pathlib import Path
 
 from dotenv import load_dotenv
-load_dotenv(Path(__file__).parent / ".env")
+load_dotenv(Path(__file__).parent / ".env", override=True)
 
 from fastapi import FastAPI, HTTPException, Depends, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
@@ -136,6 +136,7 @@ class AnnotationCreate(BaseModel):
 class AnnotationPatch(BaseModel):
     note_body: Optional[str] = None
     color: Optional[str] = None
+    type: Optional[str] = None
 
 class ShadowNotePut(BaseModel):
     body: str
@@ -557,6 +558,8 @@ def patch_annotation(ann_id: str, body: AnnotationPatch, s: Session = Depends(ge
         ann.note_body = body.note_body
     if body.color is not None:
         ann.color = body.color
+    if body.type is not None:
+        ann.type = body.type
     ann.updated_at = datetime.utcnow()
     s.add(ann)
     s.commit()

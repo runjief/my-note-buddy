@@ -59,7 +59,7 @@ const COLORS: Record<string, string> = {
 export function AnnotatedText({ nodeId, text, annotations, onSelection, onAnnotationClick, shadowContext }: Props) {
   const ref = useRef<HTMLDivElement>(null)
 
-  // Right-click on plain text → show annotation toolbar at cursor
+  // Right-click on plain text → show annotation toolbar positioned above selection
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     const sel = window.getSelection()
     if (!sel || sel.isCollapsed || !ref.current) { onSelection(null); return }
@@ -69,8 +69,9 @@ export function AnnotatedText({ nodeId, text, annotations, onSelection, onAnnota
     e.preventDefault()
     const { start, end } = getRangeOffsets(ref.current, range)
     if (start === end) { onSelection(null); return }
-    const rect = new DOMRect(e.clientX, e.clientY, 0, 0)
-    onSelection({ nodeId, start, end, text: range.toString(), rect, isShadowContext: shadowContext })
+    // Use the selection's bounding rect (not cursor position) so toolbar doesn't cover the text
+    const selRect = range.getBoundingClientRect()
+    onSelection({ nodeId, start, end, text: range.toString(), rect: selRect, isShadowContext: shadowContext })
   }, [nodeId, onSelection, shadowContext])
 
   const segments = buildSegments(text, annotations)
@@ -86,7 +87,8 @@ export function AnnotatedText({ nodeId, text, annotations, onSelection, onAnnota
               onContextMenu={e => {
                 e.preventDefault()
                 e.stopPropagation()
-                onAnnotationClick(seg.ann, new DOMRect(e.clientX, e.clientY, 0, 0))
+                // Use the mark element's bounding rect so toolbar is above the highlighted word
+                onAnnotationClick(seg.ann, (e.currentTarget as HTMLElement).getBoundingClientRect())
               }}>
               {seg.text}
             </mark>
@@ -97,7 +99,7 @@ export function AnnotatedText({ nodeId, text, annotations, onSelection, onAnnota
             onContextMenu={e => {
               e.preventDefault()
               e.stopPropagation()
-              onAnnotationClick(seg.ann, new DOMRect(e.clientX, e.clientY, 0, 0))
+              onAnnotationClick(seg.ann, (e.currentTarget as HTMLElement).getBoundingClientRect())
             }}>
             {seg.text}
           </del>
@@ -125,14 +127,20 @@ const SWATCHES = [
   { key: 'pink',   display: '#ff64a0' },
 ]
 
+const TOOLBAR_H = 84  // approximate rendered height
+const TOOLBAR_GAP = 8
+
 export function SelectionToolbar({ selection, onHighlight, onCrossout, onDismiss, onRemove }: ToolbarProps) {
   const [crossoutHover, setCrossoutHover] = useState(false)
+  const toolbarW = 260
 
   const { rect } = selection
-  const toolbarW = 260
+  // Position above the selection; fall back below if not enough room
   const left = Math.max(8, Math.min(window.innerWidth - toolbarW - 8,
     rect.left + rect.width / 2 - toolbarW / 2))
-  const top = rect.top > 80 ? rect.top - 56 : rect.bottom + 8
+  const top = rect.top >= TOOLBAR_H + TOOLBAR_GAP
+    ? rect.top - TOOLBAR_H - TOOLBAR_GAP
+    : rect.bottom + TOOLBAR_GAP
 
   const preview = selection.text.slice(0, 40) + (selection.text.length > 40 ? '…' : '')
 
@@ -140,7 +148,8 @@ export function SelectionToolbar({ selection, onHighlight, onCrossout, onDismiss
     <div
       className="selection-toolbar"
       style={{ top, left, width: toolbarW, flexDirection: 'column', gap: 6 }}
-      onMouseDown={e => e.preventDefault()}
+      // Prevent mousedown from blurring the selection or triggering click-outside handler
+      onMouseDown={e => e.stopPropagation()}
     >
       <div style={{
         fontSize: 12, color: 'var(--text-2)', maxWidth: '100%',
@@ -158,7 +167,7 @@ export function SelectionToolbar({ selection, onHighlight, onCrossout, onDismiss
             className="color-swatch"
             style={{ backgroundColor: display }}
             title={`Highlight ${key}`}
-            onClick={() => onHighlight(key)}
+            onMouseDown={e => { e.preventDefault(); e.stopPropagation(); onHighlight(key) }}
           />
         ))}
         <div style={{ width: 1, height: 16, background: 'var(--line-strong)', margin: '0 2px', flexShrink: 0 }} />
@@ -167,14 +176,14 @@ export function SelectionToolbar({ selection, onHighlight, onCrossout, onDismiss
           title="Crossout"
           onMouseEnter={() => setCrossoutHover(true)}
           onMouseLeave={() => setCrossoutHover(false)}
-          onClick={onCrossout}
+          onMouseDown={e => { e.preventDefault(); e.stopPropagation(); onCrossout() }}
         >
           ~~
         </button>
         <div style={{ flex: 1 }} />
         {onRemove
-          ? <button className="sel-btn" onClick={onRemove} title="Remove annotation" style={{ color: 'var(--danger)' }}>Remove</button>
-          : <button className="sel-btn" onClick={onDismiss} title="Cancel" style={{ color: 'var(--text-3)' }}>✕</button>
+          ? <button className="sel-btn" onMouseDown={e => { e.preventDefault(); e.stopPropagation(); onRemove() }} style={{ color: 'var(--danger)' }}>Remove</button>
+          : <button className="sel-btn" onMouseDown={e => { e.preventDefault(); e.stopPropagation(); onDismiss() }} style={{ color: 'var(--text-3)' }}>✕</button>
         }
       </div>
     </div>
