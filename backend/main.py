@@ -19,8 +19,10 @@ from sqlalchemy import text as sql_text
 
 # ── DB setup ────────────────────────────────────────────────────────────────
 
-os.makedirs("data", exist_ok=True)
-DATABASE_URL = "sqlite:///./data/note-tool.db"
+# DATA_DIR env var lets Fly.io point to the persistent volume (/data)
+_DATA_DIR = os.environ.get("DATA_DIR", os.path.join(os.path.dirname(__file__), "data"))
+os.makedirs(_DATA_DIR, exist_ok=True)
+DATABASE_URL = f"sqlite:///{_DATA_DIR}/note-tool.db"
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 
 def get_session():
@@ -791,8 +793,16 @@ async def upload_image(file: UploadFile = File(...)):
 
 # ── Serve built frontend ───────────────────────────────────────────────────────
 
-DIST = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
-if os.path.isdir(DIST):
+_here = os.path.dirname(__file__)
+# In Docker: dist/ sits next to main.py. In local dev: ../frontend/dist/
+DIST = next(
+    (p for p in [
+        os.path.join(_here, "dist"),
+        os.path.join(_here, "..", "frontend", "dist"),
+    ] if os.path.isdir(p)),
+    None,
+)
+if DIST:
     app.mount("/assets", StaticFiles(directory=os.path.join(DIST, "assets")), name="assets")
 
     @app.get("/{full_path:path}", include_in_schema=False)

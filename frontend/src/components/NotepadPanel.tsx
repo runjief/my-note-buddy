@@ -98,6 +98,65 @@ function replaceCodeBlock(body: string, blockIdx: number, newCode: string, newLa
   })
 }
 
+// ── Inline markdown renderer ───────────────────────────────────────────────────
+
+// Supports: **bold**, *italic*, `code`, ==highlight==, https://urls
+const INLINE_RE = /(`[^`\n]+`)|(\*\*([^*\n]+)\*\*)|(\*([^*\n]+)\*)|==([^=\n]+)==|(https?:\/\/[^\s,)>"]+)/g
+
+function renderInlineText(text: string): React.ReactNode[] {
+  const nodes: React.ReactNode[] = []
+  let last = 0
+  let m: RegExpExecArray | null
+  INLINE_RE.lastIndex = 0
+  while ((m = INLINE_RE.exec(text)) !== null) {
+    if (m.index > last) nodes.push(text.slice(last, m.index))
+    if      (m[1]) nodes.push(<code key={m.index} className="note-inline-code">{m[1].slice(1, -1)}</code>)
+    else if (m[2]) nodes.push(<strong key={m.index}>{m[3]}</strong>)
+    else if (m[4]) nodes.push(<em key={m.index}>{m[5]}</em>)
+    else if (m[6]) nodes.push(<mark key={m.index} className="note-mark">{m[6]}</mark>)
+    else if (m[7]) nodes.push(<a key={m.index} href={m[7]} target="_blank" rel="noopener noreferrer">{m[7]}</a>)
+    last = m.index + m[0].length
+  }
+  if (last < text.length) nodes.push(text.slice(last))
+  return nodes
+}
+
+// ── Plain-text ↔ raw-body position mapping ────────────────────────────────────
+
+// Given raw markdown body and a plain-text selection string, returns [rawStart, rawEnd)
+// that covers the corresponding raw range (expanding to include full ==...== markers).
+function rawRangeForPlainSel(raw: string, sel: string): [number, number] | null {
+  type Seg = { rawStart: number; rawEnd: number; plain: string; isMarker: boolean }
+  const segs: Seg[] = []
+  const re = /==([^=\n]+)==/g
+  let last = 0, m: RegExpExecArray | null
+  while ((m = re.exec(raw)) !== null) {
+    if (m.index > last) segs.push({ rawStart: last, rawEnd: m.index, plain: raw.slice(last, m.index), isMarker: false })
+    segs.push({ rawStart: m.index, rawEnd: m.index + m[0].length, plain: m[1], isMarker: true })
+    last = m.index + m[0].length
+  }
+  if (last < raw.length) segs.push({ rawStart: last, rawEnd: raw.length, plain: raw.slice(last), isMarker: false })
+
+  const plainStr = segs.map(s => s.plain).join('')
+  const idx = plainStr.indexOf(sel)
+  if (idx === -1) return null
+  const plainEnd = idx + sel.length
+
+  let pos = 0, rawStart = -1, rawEnd = -1
+  for (const seg of segs) {
+    const sEnd = pos + seg.plain.length
+    if (rawStart === -1 && sEnd > idx) {
+      rawStart = seg.isMarker ? seg.rawStart : seg.rawStart + (idx - pos)
+    }
+    if (rawEnd === -1 && sEnd >= plainEnd) {
+      rawEnd = seg.isMarker ? seg.rawEnd : seg.rawStart + (plainEnd - pos)
+      break
+    }
+    pos = sEnd
+  }
+  return rawStart !== -1 && rawEnd !== -1 ? [rawStart, rawEnd] : null
+}
+
 // ── Image rendering ────────────────────────────────────────────────────────────
 
 function renderBodyWithImages(body: string, onZoom: (url: string) => void) {
@@ -107,7 +166,7 @@ function renderBodyWithImages(body: string, onZoom: (url: string) => void) {
       <img key={i} src={m[1]} className="note-image"
         onClick={() => onZoom(m[1])} alt="" title="Click to enlarge" />
     )
-    return part ? <span key={i} style={{ whiteSpace: 'pre-wrap' }}>{part}</span> : null
+    return part ? <span key={i} style={{ whiteSpace: 'pre-wrap' }}>{renderInlineText(part)}</span> : null
   })
 }
 
@@ -178,15 +237,17 @@ interface NoteCardProps {
 
 function NoteCard({ ann, pinned, onPin, onUpdate, onDelete, onZoomImage }: NoteCardProps) {
   const [body, setBody]       = useState(ann.note_body ?? '')
-  const [preview, setPreview] = useState(() => !!(ann.note_body?.trim()))
+  const [preview, setPreview] = useState(true)
   const [uploading, setUploading] = useState(false)
   const [r2Available, setR2Available] = useState<boolean | null>(null)
   const [editingCode, setEditingCode] = useState<CodeSegment | null>(null)
   const [viewingCode, setViewingCode]  = useState<CodeSegment | null>(null)
   const [addingCode, setAddingCode] = useState(false)
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; sel: string } | null>(null)
   const saveTimer   = useRef<ReturnType<typeof setTimeout> | null>(null)
   const fileRef     = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const ctxMenuRef  = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     api.r2Status().then(s => setR2Available(s.configured)).catch(() => setR2Available(false))
@@ -206,6 +267,56 @@ function NoteCard({ ann, pinned, onPin, onUpdate, onDelete, onZoomImage }: NoteC
   }
 
   useEffect(() => () => { if (saveTimer.current) clearTimeout(saveTimer.current) }, [])
+
+  useEffect(() => {
+    if (!ctxMenu) return
+    const handler = (e: MouseEvent) => {
+      if (ctxMenuRef.current && !ctxMenuRef.current.contains(e.target as Node)) setCtxMenu(null)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [ctxMenu])
+
+  const handleContextMenu = (e: React.MouseEvent) => {
+    // Prefer active text selection; fall back to the <mark> element being right-clicked
+    let sel = window.getSelection()?.toString().trim() ?? ''
+    if (!sel) {
+      const markEl = (e.target as HTMLElement).closest?.('mark')
+      if (markEl) sel = markEl.textContent?.trim() ?? ''
+    }
+    if (!sel) return
+    e.preventDefault()
+    setCtxMenu({ x: e.clientX, y: e.clientY, sel })
+  }
+
+  const applyHighlight = () => {
+    if (!ctxMenu) return
+    const { sel } = ctxMenu
+    const marked = `==${sel}==`
+    let next: string
+
+    if (body.includes(marked)) {
+      // Exact highlight exists → remove it
+      next = body.replace(marked, sel)
+    } else {
+      // Try direct substring match first (no existing highlights in range)
+      const idx = body.indexOf(sel)
+      if (idx !== -1) {
+        next = body.slice(0, idx) + marked + body.slice(idx + sel.length)
+      } else {
+        // Selection crosses existing ==...== markers: map via plain text
+        const range = rawRangeForPlainSel(body, sel)
+        if (!range) { setCtxMenu(null); return }
+        const [rawStart, rawEnd] = range
+        // Strip any nested markers in the raw slice before re-wrapping
+        const inner = body.slice(rawStart, rawEnd).replace(/==([^=\n]+)==/g, '$1')
+        next = body.slice(0, rawStart) + `==${inner}==` + body.slice(rawEnd)
+      }
+    }
+    handleChange(next)
+    setCtxMenu(null)
+    window.getSelection()?.removeAllRanges()
+  }
 
   const insertAtCursor = (insertion: string, cursorOffset?: number) => {
     const ta = textareaRef.current
@@ -306,7 +417,7 @@ function NoteCard({ ann, pinned, onPin, onUpdate, onDelete, onZoomImage }: NoteC
       </div>
 
       {preview ? (
-        <div className="note-preview" onClick={() => { if (segments.every(s => s.kind === 'text')) setPreview(false) }} title="Click to edit">
+        <div className="note-preview" onContextMenu={handleContextMenu}>
           {body.trim() ? (
             <>
               {segments.map((seg, i) => {
@@ -326,7 +437,7 @@ function NoteCard({ ann, pinned, onPin, onUpdate, onDelete, onZoomImage }: NoteC
               {hasImages && <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 4 }}>Click image to enlarge</div>}
             </>
           ) : (
-            <span style={{ color: 'var(--text-3)', fontStyle: 'italic' }}>Empty — click to edit</span>
+            <span style={{ color: 'var(--text-3)', fontStyle: 'italic' }}>Empty — press Edit to write</span>
           )}
         </div>
       ) : (
@@ -334,8 +445,7 @@ function NoteCard({ ann, pinned, onPin, onUpdate, onDelete, onZoomImage }: NoteC
           onChange={e => handleChange(e.target.value)}
           onPaste={handlePaste}
           placeholder="Write a note… paste images or insert code blocks"
-          style={{ minHeight: 72 }}
-          onBlur={() => { if (body.trim()) setPreview(true) }} />
+          style={{ minHeight: 72 }} />
       )}
 
       <div className="note-card-actions">
@@ -365,6 +475,15 @@ function NoteCard({ ann, pinned, onPin, onUpdate, onDelete, onZoomImage }: NoteC
           onSave={handleNewCodeSave}
           onClose={() => setAddingCode(false)}
         />
+      )}
+
+      {ctxMenu && createPortal(
+        <div ref={ctxMenuRef} className="note-ctx-menu" style={{ left: ctxMenu.x, top: ctxMenu.y }}>
+          <button onClick={applyHighlight}>
+            {body.includes(`==${ctxMenu.sel}==`) ? 'Remove highlight' : 'Highlight'}
+          </button>
+        </div>,
+        document.body
       )}
     </div>
   )
